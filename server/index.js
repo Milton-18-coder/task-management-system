@@ -14,6 +14,7 @@ import {
 import {
   initDeadlineScheduler,
   checkAndSendDeadlineReminders,
+  isDeadlineTodayKolkata,
 } from './reminderScheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -322,6 +323,15 @@ app.post('/api/tasks', authenticateToken, async (req, res) => {
 
         const emailResult = await sendTaskAssignedEmail(newTask, assigneeUser, creatorUser, pool);
         emailStatus = emailResult.status || (emailResult.success ? 'sent' : 'failed');
+
+        // If the task's deadline date is today, also send the deadline reminder email
+        if (taskDueDate && isDeadlineTodayKolkata(taskDueDate) && !newTask.completed) {
+          setTimeout(() => {
+            checkAndSendDeadlineReminders({ targetTaskId: result.insertId, markSent: true }).catch((err) => {
+              console.error('[TaskReminder] Auto deadline reminder check failed:', err.message);
+            });
+          }, 1000);
+        }
       }
     } catch (emailErr) {
       console.error('[TaskEmail] Error in assignment email dispatch:', emailErr.message);
@@ -436,6 +446,15 @@ app.put('/api/tasks/:id', authenticateToken, async (req, res) => {
       status: updatedRows[0].status || (updatedRows[0].completed ? 'done' : 'todo'),
       deadline_reminder_sent: Boolean(updatedRows[0].deadline_reminder_sent),
     };
+
+    if (resetReminder && updatedDueDate && isDeadlineTodayKolkata(updatedDueDate) && !task.completed) {
+      setTimeout(() => {
+        checkAndSendDeadlineReminders({ targetTaskId: id, markSent: true }).catch((err) => {
+          console.error('[TaskReminder] Auto deadline reminder check failed on update:', err.message);
+        });
+      }, 1000);
+    }
+
     res.json(task);
   } catch (error) {
     console.error('Error updating task:', error);

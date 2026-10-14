@@ -19,6 +19,9 @@ dotenv.config();
 /**
  * Get current date string in Asia/Kolkata as YYYY-MM-DD
  */
+/**
+ * Get current date string in Asia/Kolkata as YYYY-MM-DD
+ */
 export function getTodayKolkataString() {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
@@ -30,31 +33,62 @@ export function getTodayKolkataString() {
 }
 
 /**
- * Check if a date/string falls on today's date in Asia/Kolkata
+ * Robustly normalize any date string or Date object to YYYY-MM-DD in TIMEZONE
  */
-export function isDeadlineTodayKolkata(dateInput) {
-  if (!dateInput) return false;
-  try {
-    const d = new Date(dateInput);
-    if (isNaN(d.getTime())) return false;
-
+export function normalizeDateToYYYYMMDD(dateInput) {
+  if (!dateInput) return null;
+  if (typeof dateInput === 'string') {
+    const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+  }
+  if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: TIMEZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     });
-    const taskDateStr = formatter.format(d);
-    const todayStr = getTodayKolkataString();
-
-    return taskDateStr === todayStr;
+    return formatter.format(dateInput);
+  }
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return null;
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(d);
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
- * Query eligible tasks and send final deadline reminders
+ * Check if a date falls strictly on today's date in Asia/Kolkata
+ */
+export function isDeadlineTodayKolkata(dateInput) {
+  const taskDateStr = normalizeDateToYYYYMMDD(dateInput);
+  if (!taskDateStr) return false;
+  const todayStr = getTodayKolkataString();
+  return taskDateStr === todayStr;
+}
+
+/**
+ * Check if a deadline is due today or past due (and needs reminder)
+ */
+export function isDeadlineDueOrOverdueTodayKolkata(dateInput) {
+  const taskDateStr = normalizeDateToYYYYMMDD(dateInput);
+  if (!taskDateStr) return false;
+  const todayStr = getTodayKolkataString();
+  return taskDateStr <= todayStr;
+}
+
+/**
+ * Query eligible tasks and send deadline reminder emails on the deadline date
  */
 export async function checkAndSendDeadlineReminders({
   forceAll = false,
@@ -104,10 +138,10 @@ export async function checkAndSendDeadlineReminders({
     };
 
     for (const task of rows) {
-      const isToday = isDeadlineTodayKolkata(task.due_date);
+      const isDue = isDeadlineDueOrOverdueTodayKolkata(task.due_date);
 
-      // Skip if not today (unless targetTaskId or forceAll is specified)
-      if (!isToday && !targetTaskId && !forceAll && !testMode) {
+      // Skip if deadline has not arrived yet (unless targetTaskId or forceAll is specified)
+      if (!isDue && !targetTaskId && !forceAll && !testMode) {
         summary.skippedCount++;
         continue;
       }
@@ -142,7 +176,7 @@ export async function checkAndSendDeadlineReminders({
         email: task.creator_email,
       };
 
-      // Send the reminder email
+      // Send the deadline reminder email
       const result = await sendTaskDeadlineReminderEmail(task, assigneeUser, creatorUser, pool);
 
       if (result.success) {
@@ -195,9 +229,26 @@ export function initDeadlineScheduler() {
   const cronExpression = `${validMinute} ${validHour} * * *`;
 
   console.log(
-    `⏰ Deadline reminder scheduler scheduled: Daily at ${validHour.toString().padStart(2, '0')}:${validMinute.toString().padStart(2, '0')} (${TIMEZONE}) [Expression: "${cronExpression}"]`
+    `⏰ Deadline reminder scheduler active: Daily at ${validHour.toString().padStart(2, '0')}:${validMinute.toString().padStart(2, '0')} (${TIMEZONE}) [Expression: "${cronExpression}"] & periodic check every 5 minutes`
   );
 
+  // 1. Immediate check on server boot so tasks due today are immediately processed
+  setTimeout(() => {
+    checkAndSendDeadlineReminders().catch((err) => {
+      console.error('[TaskReminder] Initial startup check error:', err.message);
+    });
+  }, 2000);
+
+  // 2. Periodic check every 5 minutes to capture any tasks whose deadline is reached during the day
+  cron.schedule(
+    '*/5 * * * *',
+    async () => {
+      await checkAndSendDeadlineReminders();
+    },
+    { timezone: TIMEZONE }
+  );
+
+  // 3. Primary daily morning scheduled run
   const task = cron.schedule(
     cronExpression,
     async () => {
