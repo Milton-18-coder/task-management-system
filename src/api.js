@@ -1,31 +1,26 @@
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
-const TOKEN_STORAGE_KEY = 'task_mgmt_token';
-const USER_STORAGE_KEY = 'task_mgmt_user';
+const TOKEN_STORAGE_KEY = "task_mgmt_token";
+const USER_STORAGE_KEY = "task_mgmt_user";
 
 export const authStorage = {
   getToken: () => localStorage.getItem(TOKEN_STORAGE_KEY),
   setToken: (token) => {
-    if (token) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-    }
+    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(TOKEN_STORAGE_KEY);
   },
   getUser: () => {
     try {
       const user = localStorage.getItem(USER_STORAGE_KEY);
       return user ? JSON.parse(user) : null;
     } catch {
+      localStorage.removeItem(USER_STORAGE_KEY);
       return null;
     }
   },
   setUser: (user) => {
-    if (user) {
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(USER_STORAGE_KEY);
-    }
+    if (user) localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_STORAGE_KEY);
   },
   clearAuth: () => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -33,183 +28,67 @@ export const authStorage = {
   },
 };
 
-const getAuthHeaders = () => {
+export class ApiError extends Error {
+  constructor(message, status = 0, details = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.details = details;
+  }
+}
+
+async function apiRequest(path, { auth = true, body, headers, ...options } = {}) {
   const token = authStorage.getToken();
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-};
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(auth && token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  }).catch((error) => {
+    throw new ApiError("Unable to reach the TaskPulse server. Check that the backend is running.", 0, error);
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (auth && response.status === 401) {
+      authStorage.clearAuth();
+      window.dispatchEvent(new CustomEvent("taskpulse:auth-expired"));
+    }
+    throw new ApiError(data.error || `Request failed (${response.status})`, response.status, data);
+  }
+
+  return data;
+}
 
 export const authApi = {
-  // Register a new user
-  async register({ name, email, password }) {
-    const res = await fetch(`${API_BASE_URL}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Registration failed (${res.status})`);
-    }
-    return data;
-  },
-
-  // Log in user
-  async login({ email, password }) {
-    const res = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Login failed (${res.status})`);
-    }
-    return data;
-  },
-
-  // Get current user profile
-  async getMe() {
-    const res = await fetch(`${API_BASE_URL}/auth/me`, {
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Session check failed (${res.status})`);
-    }
-    return data;
-  },
+  register: (credentials) => apiRequest("/auth/register", { method: "POST", auth: false, body: credentials }),
+  login: (credentials) => apiRequest("/auth/login", { method: "POST", auth: false, body: credentials }),
+  getMe: () => apiRequest("/auth/me"),
 };
 
 export const userApi = {
-  async getUsers() {
-    const res = await fetch(`${API_BASE_URL}/users`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
+  getUsers: () => apiRequest("/users"),
 };
 
 export const taskApi = {
-  // Check health / connection
   async checkHealth() {
     try {
-      const res = await fetch(`${API_BASE_URL}/health`);
-      return await res.json();
-    } catch (err) {
-      return { status: 'offline', message: err.message };
+      return await apiRequest("/health", { auth: false });
+    } catch (error) {
+      return { status: "offline", message: error.message, devToolsEnabled: false };
     }
   },
-
-  // Get all tasks for authenticated user
-  async getTasks() {
-    const res = await fetch(`${API_BASE_URL}/tasks`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
-
-  // Create a new task
-  async createTask(task) {
-    const res = await fetch(`${API_BASE_URL}/tasks`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(task),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
-
-  // Update a task
-  async updateTask(id, updates) {
-    const res = await fetch(`${API_BASE_URL}/tasks/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(updates),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
-
-  // Delete a single task
-  async deleteTask(id) {
-    const res = await fetch(`${API_BASE_URL}/tasks/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
-
-  // Clear all tasks
-  async clearAllTasks() {
-    const res = await fetch(`${API_BASE_URL}/tasks`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
-
-  // Send a test reminder email for a specific task (Dev / Admin test)
-  async sendTestReminder(id, markSent = false) {
-    const res = await fetch(`${API_BASE_URL}/tasks/${id}/test-reminder`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ markSent }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Failed to trigger test reminder (${res.status})`);
-    }
-    return data;
-  },
-
-  // Trigger deadline reminder check cycle manually
-  async triggerReminderCheck(forceAll = false) {
-    const res = await fetch(`${API_BASE_URL}/reminder/trigger-check`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ forceAll }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `Failed to trigger reminder check (${res.status})`);
-    }
-    return data;
-  },
-
-  // Get email notification logs
-  async getNotifications() {
-    const res = await fetch(`${API_BASE_URL}/notifications`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error ${res.status}`);
-    }
-    return await res.json();
-  },
+  getTasks: () => apiRequest("/tasks"),
+  createTask: (task) => apiRequest("/tasks", { method: "POST", body: task }),
+  updateTask: (id, updates) => apiRequest(`/tasks/${id}`, { method: "PUT", body: updates }),
+  deleteTask: (id) => apiRequest(`/tasks/${id}`, { method: "DELETE" }),
+  clearAllTasks: (taskType) => apiRequest(`/tasks?task_type=${encodeURIComponent(taskType)}`, { method: "DELETE" }),
+  sendTestReminder: (id, markSent = false) =>
+    apiRequest(`/tasks/${id}/test-reminder`, { method: "POST", body: { markSent } }),
+  triggerReminderCheck: (forceAll = false) =>
+    apiRequest("/reminder/trigger-check", { method: "POST", body: { forceAll } }),
+  getNotifications: () => apiRequest("/notifications"),
 };

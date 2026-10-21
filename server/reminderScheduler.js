@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { getPool } from './db.js';
 import {
   sendTaskDeadlineReminderEmail,
-  formatKolkataDate,
   TIMEZONE,
 } from './emailService.js';
 
@@ -16,9 +15,6 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 dotenv.config();
 
-/**
- * Get current date string in Asia/Kolkata as YYYY-MM-DD
- */
 /**
  * Get current date string in Asia/Kolkata as YYYY-MM-DD
  */
@@ -94,6 +90,7 @@ export async function checkAndSendDeadlineReminders({
   forceAll = false,
   targetTaskId = null,
   markSent = true,
+  ownerUserId = null,
 } = {}) {
   const pool = getPool();
   if (!pool) {
@@ -104,9 +101,18 @@ export async function checkAndSendDeadlineReminders({
   const todayStr = getTodayKolkataString();
   const testMode = process.env.TASK_REMINDER_TEST_MODE === 'true';
 
-  console.log(`[TaskReminder] 🔍 Running deadline reminder check for date: ${todayStr} (Timezone: ${TIMEZONE}, ForceAll: ${forceAll || testMode})`);
+  console.log(`[TaskReminder] Running deadline reminder check for ${todayStr} (${TIMEZONE}, force: ${forceAll || testMode})`);
 
+  let lockAcquired = false;
+  let lockConnection;
   try {
+    lockConnection = await pool.getConnection();
+    const [lockRows] = await lockConnection.query('SELECT GET_LOCK(?, 0) AS acquired', ['taskpulse_deadline_reminders']);
+    lockAcquired = Boolean(lockRows[0]?.acquired);
+    if (!lockAcquired) {
+      return { busy: true, message: 'Another reminder check is already running.' };
+    }
+
     let query = `
       SELECT t.*, u.name AS assignee_name, u.email AS assignee_email,
              c.name AS creator_name, c.email AS creator_email
@@ -127,13 +133,19 @@ export async function checkAndSendDeadlineReminders({
       query += ` AND t.deadline_reminder_sent = 0`;
     }
 
-    const [rows] = await pool.query(query, params);
+    if (ownerUserId) {
+      query += ` AND (t.created_by = ? OR t.user_id = ?)`;
+      params.push(ownerUserId, ownerUserId);
+    }
+
+    const [rows] = await lockConnection.query(query, params);
 
     const summary = {
       totalFound: rows.length,
       sentCount: 0,
       failedCount: 0,
       skippedCount: 0,
+      simulatedCount: 0,
       details: [],
     };
 
@@ -179,10 +191,10 @@ export async function checkAndSendDeadlineReminders({
       // Send the deadline reminder email
       const result = await sendTaskDeadlineReminderEmail(task, assigneeUser, creatorUser, pool);
 
-      if (result.success) {
+      if (result.delivered) {
         // Mark as sent in the database safely AFTER email was sent
         if (markSent) {
-          await pool.query(
+          await lockConnection.query(
             `UPDATE tasks SET deadline_reminder_sent = 1, deadline_reminder_sent_at = NOW() WHERE id = ?`,
             [task.id]
           );
@@ -193,6 +205,13 @@ export async function checkAndSendDeadlineReminders({
           taskId: task.id,
           recipient: task.assignee_email,
           status: 'sent',
+        });
+      } else if (result.simulated) {
+        summary.simulatedCount++;
+        summary.details.push({
+          taskId: task.id,
+          recipient: task.assignee_email,
+          status: 'simulated',
         });
       } else {
         // Keep deadline_reminder_sent = 0 to allow retry
@@ -207,13 +226,18 @@ export async function checkAndSendDeadlineReminders({
     }
 
     console.log(
-      `[TaskReminder] Finished reminder cycle. Sent: ${summary.sentCount}, Failed: ${summary.failedCount}, Skipped: ${summary.skippedCount}`
+      `[TaskReminder] Finished reminder cycle. Sent: ${summary.sentCount}, Simulated: ${summary.simulatedCount}, Failed: ${summary.failedCount}, Skipped: ${summary.skippedCount}`
     );
 
     return summary;
   } catch (error) {
     console.error('[TaskReminder] Error during deadline reminder execution:', error);
     return { error: error.message };
+  } finally {
+    if (lockAcquired) {
+      await lockConnection.query('SELECT RELEASE_LOCK(?)', ['taskpulse_deadline_reminders']).catch(() => {});
+    }
+    lockConnection?.release();
   }
 }
 
@@ -229,7 +253,7 @@ export function initDeadlineScheduler() {
   const cronExpression = `${validMinute} ${validHour} * * *`;
 
   console.log(
-    `⏰ Deadline reminder scheduler active: Daily at ${validHour.toString().padStart(2, '0')}:${validMinute.toString().padStart(2, '0')} (${TIMEZONE}) [Expression: "${cronExpression}"] & periodic check every 5 minutes`
+    `Deadline reminder scheduler active: daily at ${validHour.toString().padStart(2, '0')}:${validMinute.toString().padStart(2, '0')} (${TIMEZONE}); safety check every 5 minutes.`
   );
 
   // 1. Immediate check on server boot so tasks due today are immediately processed
@@ -252,7 +276,7 @@ export function initDeadlineScheduler() {
   const task = cron.schedule(
     cronExpression,
     async () => {
-      console.log(`⏰ Triggering daily deadline reminder cron job at ${new Date().toISOString()}...`);
+      console.log(`Triggering daily deadline reminder job at ${new Date().toISOString()}.`);
       await checkAndSendDeadlineReminders();
     },
     {

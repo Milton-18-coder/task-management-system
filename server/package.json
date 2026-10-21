@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node test_email_notifications.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -11,6 +11,20 @@ dotenv.config({ path: path.resolve(__dirname, '.env') });
 dotenv.config();
 
 let transporter = null;
+let deliveryMode = 'simulated';
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function safeSubject(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+}
 
 /**
  * Timezone configuration (default: Asia/Kolkata)
@@ -59,7 +73,7 @@ export function formatKolkataDate(dateInput, includeTime = false) {
     }
 
     return baseDate;
-  } catch (err) {
+  } catch {
     return String(dateInput);
   }
 }
@@ -84,19 +98,25 @@ export async function getTransporter() {
       secure,
       auth: { user, pass },
       tls: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
       },
     });
-    console.log(`📧 Nodemailer SMTP transporter initialized with host: ${host}:${port}`);
+    deliveryMode = 'smtp';
+    console.log(`Nodemailer SMTP transporter initialized with host: ${host}:${port}`);
   } else {
-    // Development fallback: Use JSON transport / ethereal mock for local testing
-    console.log(`⚠️ SMTP credentials not fully configured in .env. Initializing local dev mock transporter.`);
+    console.log('SMTP is not configured. Email delivery will be simulated with the JSON transport.');
     transporter = nodemailer.createTransport({
       jsonTransport: true,
     });
+    deliveryMode = 'simulated';
   }
 
   return transporter;
+}
+
+export function getEmailDeliveryMode() {
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) return 'smtp';
+  return deliveryMode;
 }
 
 /**
@@ -125,7 +145,7 @@ export async function logNotification(pool, {
 /**
  * Generate Base Email Shell HTML
  */
-function getEmailShell({ badgeText, badgeBg, badgeColor, title, subtitle, contentHtml }) {
+function getEmailShell({ badgeText, badgeBg, badgeColor, title, contentHtml }) {
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -292,7 +312,7 @@ function getEmailShell({ badgeText, badgeBg, badgeColor, title, subtitle, conten
     <table class="email-container" width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td class="header">
-          <div class="brand-title">TASK MANAGEMENT SYSTEM</div>
+          <div class="brand-title">TASKPULSE</div>
           <div class="badge">${badgeText}</div>
           <h1 class="header-heading">${title}</h1>
         </td>
@@ -304,7 +324,7 @@ function getEmailShell({ badgeText, badgeBg, badgeColor, title, subtitle, conten
       </tr>
       <tr>
         <td class="footer">
-          <p style="margin: 0 0 6px 0;">© ${new Date().getFullYear()} Task Management System. All rights reserved.</p>
+          <p style="margin: 0 0 6px 0;">&copy; ${new Date().getFullYear()} TaskPulse. All rights reserved.</p>
           <p style="margin: 0; font-size: 12px;">Timezone: ${TIMEZONE}</p>
         </td>
       </tr>
@@ -321,8 +341,8 @@ function getEmailShell({ badgeText, badgeBg, badgeColor, title, subtitle, conten
 export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, pool = null) {
   const taskId = task.id ? `TASK-${task.id}` : 'TASK-NEW';
   const recipientEmail = assigneeUser?.email;
-  const assigneeName = assigneeUser?.name || 'Team Member';
-  const creatorName = creatorUser?.name || 'Administrator';
+  const assigneeName = escapeHtml(assigneeUser?.name || 'Team Member');
+  const creatorName = escapeHtml(creatorUser?.name || 'Task creator');
   const priority = (task.priority || 'medium').toLowerCase();
   const status = (task.status || (task.completed ? 'done' : 'todo')).toLowerCase();
   const deadlineStr = task.due_date ? formatKolkataDate(task.due_date) : 'No deadline set';
@@ -333,7 +353,9 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
     return { success: false, status: 'skipped', reason: 'No recipient email' };
   }
 
-  const subject = `New Task Assigned: ${task.title}`;
+  const subject = safeSubject(`New Task Assigned: ${task.title}`);
+  const safeTitle = escapeHtml(task.title);
+  const safeDescription = escapeHtml(task.description);
   const fromAddress = process.env.SMTP_FROM || `"Task Management System" <notifications@taskmanagement.local>`;
 
   const contentHtml = `
@@ -341,8 +363,8 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
     <p class="intro-text">A new task has been assigned to you in the Task Management System.</p>
 
     <div class="card">
-      <div class="card-title">${task.title}</div>
-      ${task.description ? `<p class="card-desc">${task.description}</p>` : ''}
+      <div class="card-title">${safeTitle}</div>
+      ${task.description ? `<p class="card-desc">${safeDescription}</p>` : ''}
       
       <table class="details-table">
         <tr>
@@ -381,7 +403,7 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
     </div>
 
     <div class="callout">
-      📌 Please review and complete the task before the deadline.
+      Please review and complete the task before the deadline.
     </div>
   `;
 
@@ -390,7 +412,6 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
     badgeBg: 'rgba(99, 102, 241, 0.2)',
     badgeColor: '#818cf8',
     title: 'New Task Assigned',
-    subtitle: task.title,
     contentHtml,
   });
 
@@ -403,7 +424,9 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
       html,
     });
 
-    console.log(`[TaskEmail] Task created: ${taskId} | Recipient: ${recipientEmail} | Status: SENT`);
+    const simulated = getEmailDeliveryMode() === 'simulated';
+    const resultStatus = simulated ? 'simulated' : 'sent';
+    console.log(`[TaskEmail] Task: ${taskId} | Recipient: ${recipientEmail} | Status: ${resultStatus.toUpperCase()}`);
 
     if (pool) {
       await logNotification(pool, {
@@ -411,11 +434,18 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
         recipientId: assigneeUser?.id || null,
         recipientEmail,
         notificationType: 'TASK_ASSIGNED_EMAIL',
-        status: 'SENT',
+        status: simulated ? 'SIMULATED' : 'SENT',
+        errorMessage: simulated ? 'SMTP not configured; message rendered using JSON transport.' : null,
       });
     }
 
-    return { success: true, status: 'sent', messageId: info.messageId };
+    return {
+      success: true,
+      delivered: !simulated,
+      simulated,
+      status: resultStatus,
+      messageId: info.messageId,
+    };
   } catch (error) {
     console.error(`[TaskEmail] Task: ${taskId} | Recipient: ${recipientEmail} | Status: FAILED | Reason: ${error.message}`);
 
@@ -440,8 +470,8 @@ export async function sendTaskAssignedEmail(task, assigneeUser, creatorUser, poo
 export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorUser, pool = null) {
   const taskId = task.id ? `TASK-${task.id}` : 'TASK-UNKNOWN';
   const recipientEmail = assigneeUser?.email;
-  const assigneeName = assigneeUser?.name || 'Team Member';
-  const creatorName = creatorUser?.name || 'Administrator';
+  const assigneeName = escapeHtml(assigneeUser?.name || 'Team Member');
+  const creatorName = escapeHtml(creatorUser?.name || 'Task creator');
   const priority = (task.priority || 'medium').toLowerCase();
   const status = (task.status || (task.completed ? 'done' : 'todo')).toLowerCase();
   const deadlineStr = task.due_date ? formatKolkataDate(task.due_date) : 'Today';
@@ -452,7 +482,9 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
     return { success: false, status: 'skipped', reason: 'No recipient email' };
   }
 
-  const subject = `Final Reminder: Task Deadline Today - ${task.title}`;
+  const subject = safeSubject(`Final Reminder: Task Deadline Today - ${task.title}`);
+  const safeTitle = escapeHtml(task.title);
+  const safeDescription = escapeHtml(task.description);
   const fromAddress = process.env.SMTP_FROM || `"Task Management System" <notifications@taskmanagement.local>`;
 
   const contentHtml = `
@@ -462,8 +494,8 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
     </p>
 
     <div class="card" style="border-left: 4px solid #f59e0b;">
-      <div class="card-title">${task.title}</div>
-      ${task.description ? `<p class="card-desc">${task.description}</p>` : ''}
+      <div class="card-title">${safeTitle}</div>
+      ${task.description ? `<p class="card-desc">${safeDescription}</p>` : ''}
       
       <table class="details-table">
         <tr>
@@ -498,7 +530,7 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
     </div>
 
     <div class="callout callout-warning">
-      ⚠️ <strong>Action Required:</strong> Please complete and submit your task before the end of the day.
+      <strong>Action required:</strong> Please complete and submit your task before the end of the day.
     </div>
   `;
 
@@ -507,7 +539,6 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
     badgeBg: 'rgba(245, 158, 11, 0.2)',
     badgeColor: '#fbbf24',
     title: 'FINAL DEADLINE REMINDER',
-    subtitle: task.title,
     contentHtml,
   });
 
@@ -520,7 +551,9 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
       html,
     });
 
-    console.log(`[TaskReminder] Task: ${taskId} | Deadline: ${deadlineStr} | Recipient: ${recipientEmail} | Status: SENT`);
+    const simulated = getEmailDeliveryMode() === 'simulated';
+    const resultStatus = simulated ? 'simulated' : 'sent';
+    console.log(`[TaskReminder] Task: ${taskId} | Deadline: ${deadlineStr} | Recipient: ${recipientEmail} | Status: ${resultStatus.toUpperCase()}`);
 
     if (pool) {
       await logNotification(pool, {
@@ -528,11 +561,18 @@ export async function sendTaskDeadlineReminderEmail(task, assigneeUser, creatorU
         recipientId: assigneeUser?.id || null,
         recipientEmail,
         notificationType: 'TASK_DEADLINE_REMINDER_EMAIL',
-        status: 'SENT',
+        status: simulated ? 'SIMULATED' : 'SENT',
+        errorMessage: simulated ? 'SMTP not configured; message rendered using JSON transport.' : null,
       });
     }
 
-    return { success: true, status: 'sent', messageId: info.messageId };
+    return {
+      success: true,
+      delivered: !simulated,
+      simulated,
+      status: resultStatus,
+      messageId: info.messageId,
+    };
   } catch (error) {
     console.error(`[TaskReminder] Task: ${taskId} | Recipient: ${recipientEmail} | Status: FAILED | Reason: ${error.message}`);
 

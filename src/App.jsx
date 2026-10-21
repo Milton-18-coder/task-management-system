@@ -1,1498 +1,794 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { taskApi, authApi, authStorage, userApi } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { authApi, authStorage, taskApi, userApi } from "./api";
 import Auth from "./Auth";
 import "./App.css";
 
 const PRIORITY_CONFIG = {
-  urgent: { label: "Urgent", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)", border: "rgba(239, 68, 68, 0.3)", order: 4, icon: "🔴" },
-  high: { label: "High", color: "#f97316", bg: "rgba(249, 115, 22, 0.12)", border: "rgba(249, 115, 22, 0.3)", order: 3, icon: "🟠" },
-  medium: { label: "Medium", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)", border: "rgba(234, 179, 8, 0.3)", order: 2, icon: "🟡" },
-  low: { label: "Low", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)", border: "rgba(59, 130, 246, 0.3)", order: 1, icon: "🔵" },
+  urgent: { label: "Urgent", color: "#dc2626", bg: "#fef2f2", order: 4 },
+  high: { label: "High", color: "#ea580c", bg: "#fff7ed", order: 3 },
+  medium: { label: "Medium", color: "#a16207", bg: "#fefce8", order: 2 },
+  low: { label: "Low", color: "#2563eb", bg: "#eff6ff", order: 1 },
 };
 
 const KANBAN_COLUMNS = [
-  { id: "todo", title: "To Do", icon: "📝", color: "#6366f1" },
-  { id: "in_progress", title: "In Progress", icon: "⏳", color: "#f59e0b" },
-  { id: "done", title: "Done", icon: "✅", color: "#10b981" },
+  { id: "todo", title: "To Do", color: "#6366f1" },
+  { id: "in_progress", title: "In Progress", color: "#f59e0b" },
+  { id: "done", title: "Done", color: "#10b981" },
 ];
 
-function getDueDateStatus(dueDateStr, completed) {
-  if (!dueDateStr) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+function Icon({ name, size = 18 }) {
+  const paths = {
+    check: <path d="m5 12 4 4L19 6" />,
+    grid: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
+    circle: <circle cx="12" cy="12" r="8" />,
+    progress: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    alert: <><path d="M10.3 3.6 2.4 18a2 2 0 0 0 1.8 3h15.6a2 2 0 0 0 1.8-3L13.7 3.6a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+    moon: <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z" />,
+    plus: <path d="M12 5v14M5 12h14" />,
+    menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
+    board: <><rect x="3" y="4" width="7" height="16" rx="2" /><rect x="14" y="4" width="7" height="10" rx="2" /></>,
+    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" /></>,
+    trash: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5" /></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
+    user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
+    logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M15 3h5v18h-5" /></>,
+    download: <><path d="M12 3v12M7 10l5 5 5-5" /><path d="M5 21h14" /></>,
+    upload: <><path d="M12 15V3M7 8l5-5 5 5" /><path d="M5 21h14" /></>,
+    refresh: <><path d="M20 7h-5V2" /><path d="M20 7a9 9 0 1 0 1 8" /></>,
+    briefcase: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2" /></>,
+    personal: <><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7Z" /><path d="m9 12 2 2 4-4" /></>,
+  };
+  return (
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[name] || paths.circle}
+    </svg>
+  );
+}
 
-  const due = new Date(dueDateStr);
-  due.setHours(0, 0, 0, 0);
+function dateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-  const diffTime = due.getTime() - today.getTime();
-  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+function normalizeDateKey(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || null;
+}
 
-  const formattedDate = due.toLocaleDateString("en-US", {
-    month: "short",
+function formatDate(value) {
+  const key = normalizeDateKey(value);
+  if (!key) return "No deadline";
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
     day: "numeric",
-    year: due.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
+    month: "short",
+    ...(year !== new Date().getFullYear() ? { year: "numeric" } : {}),
   });
+}
 
-  if (completed) {
-    return { label: formattedDate, state: "completed", tag: "Done" };
-  }
+function getDueDateStatus(dueDate, completed) {
+  const dueKey = normalizeDateKey(dueDate);
+  if (!dueKey) return null;
+  const todayKey = dateKey();
+  if (completed) return { label: formatDate(dueKey), state: "completed" };
+  if (dueKey < todayKey) return { label: `${formatDate(dueKey)} - overdue`, state: "overdue" };
+  if (dueKey === todayKey) return { label: "Due today", state: "today" };
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (dueKey === dateKey(tomorrow)) return { label: "Due tomorrow", state: "tomorrow" };
+  return { label: formatDate(dueKey), state: "upcoming" };
+}
 
-  if (diffDays < 0) {
-    const overdueDays = Math.abs(diffDays);
-    return {
-      label: `${formattedDate} (${overdueDays}d overdue)`,
-      state: "overdue",
-      tag: "Overdue",
-    };
-  } else if (diffDays === 0) {
-    return { label: "Due Today", state: "today", tag: "Today" };
-  } else if (diffDays === 1) {
-    return { label: "Due Tomorrow", state: "tomorrow", tag: "Tomorrow" };
-  } else {
-    return { label: formattedDate, state: "upcoming", tag: `${diffDays}d left` };
-  }
+function taskTimestamp(task) {
+  return new Date(task.updated_at || task.created_at || 0).getTime() || 0;
 }
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(authStorage.getUser());
+  const tokenAtLoad = authStorage.getToken();
+  const [currentUser, setCurrentUser] = useState(() => tokenAtLoad ? authStorage.getUser() : null);
+  const [sessionChecking, setSessionChecking] = useState(Boolean(tokenAtLoad));
+  const [authMessage, setAuthMessage] = useState("");
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [dbStatus, setDbStatus] = useState({ connected: false, message: "Checking..." });
+  const [loading, setLoading] = useState(Boolean(tokenAtLoad));
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [dbStatus, setDbStatus] = useState({ connected: false, message: "Checking connection", emailMode: "simulated", devToolsEnabled: false });
   const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
 
-  const showToast = (message, type = "info") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4500);
-  };
+  const [theme, setTheme] = useState(() => localStorage.getItem("taskpulse_theme") || localStorage.getItem("taskflow_theme") || "light");
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem("taskpulse_view") || localStorage.getItem("taskflow_view") || "list");
+  const [taskSection, setTaskSection] = useState(() => localStorage.getItem("taskpulse_section") || localStorage.getItem("taskflow_section") || "assigned");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [dueFilter, setDueFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("updated");
+  const [search, setSearch] = useState("");
 
-  // UI Theme & View Mode
-  const [theme, setTheme] = useState(() => localStorage.getItem("taskflow_theme") || "light");
-  const [viewMode, setViewMode] = useState("list"); // "list" | "kanban"
-
-  // Task form state
+  const [showForm, setShowForm] = useState(false);
+  const [editTask, setEditTask] = useState(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
   const [status, setStatus] = useState("todo");
   const [dueDate, setDueDate] = useState("");
   const [assignedUserId, setAssignedUserId] = useState("");
-  const [editId, setEditId] = useState(null);
-
-  // Filters & Sorting state
-  const [filter, setFilter] = useState("all");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("default");
-  const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [taskActionId, setTaskActionId] = useState(null);
   const [draggedTask, setDraggedTask] = useState(null);
-
+  const [confirmation, setConfirmation] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Toggle Theme
-  const toggleTheme = () => {
-    const nextTheme = theme === "light" ? "dark" : "light";
-    setTheme(nextTheme);
-    localStorage.setItem("taskflow_theme", nextTheme);
-  };
+  const showToast = useCallback((message, type = "info") => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    setToast({ message, type });
+    toastTimer.current = window.setTimeout(() => setToast(null), 4500);
+  }, []);
 
-  // Check health and session
-  const checkHealthStatus = async () => {
+  const checkHealthStatus = useCallback(async () => {
+    const health = await taskApi.checkHealth();
+    const connected = health.status === "ok";
+    setDbStatus({
+      connected,
+      message: health.message || (connected ? "Database connected" : "Server unavailable"),
+      emailMode: health.emailMode || "simulated",
+      devToolsEnabled: Boolean(health.devToolsEnabled),
+    });
+    return connected;
+  }, []);
+
+  const loadWorkspace = useCallback(async ({ showSpinner = false } = {}) => {
+    if (!currentUser || !authStorage.getToken()) return;
+    if (showSpinner) setLoading(true);
+    setWorkspaceError("");
     try {
-      const health = await taskApi.checkHealth();
-      const isOk = health.status === "ok";
-      const msg = isOk ? "MySQL Connected" : (health.message || "MySQL Offline");
-      
-      setDbStatus((prev) => {
-        if (prev.connected === isOk && prev.message === msg) return prev;
-        return { connected: isOk, message: msg };
-      });
-      return isOk;
-    } catch {
-      setDbStatus((prev) => {
-        if (!prev.connected && prev.message === "Server Offline") return prev;
-        return { connected: false, message: "Server Offline" };
-      });
-      return false;
-    }
-  };
-
-  const checkInitialStatus = async () => {
-    const isOnline = await checkHealthStatus();
-
-    // Verify existing token session if user is logged in
-    const token = authStorage.getToken();
-    if (token) {
-      try {
-        const me = await authApi.getMe();
-        if (me.user) {
-          setCurrentUser(me.user);
-          authStorage.setUser(me.user);
-        }
-      } catch {
-        if (isOnline) {
-          authStorage.clearAuth();
-          setCurrentUser(null);
-        }
-      }
-    }
-  };
-
-  const loadTasks = async (showLoadingSpinner = false) => {
-    if (!currentUser) {
-      setLoading(false);
-      return;
-    }
-
-    if (showLoadingSpinner) {
-      setLoading(true);
-    }
-
-    try {
-      const token = authStorage.getToken();
-      if (token) {
-        const fetchedTasks = await taskApi.getTasks();
-        setTasks(fetchedTasks);
-        setDbStatus((prev) => (prev.connected ? prev : { connected: true, message: "MySQL Connected" }));
-      } else {
-        const userStorageKey = `tasks_${currentUser.id || currentUser.email}`;
-        const saved = localStorage.getItem(userStorageKey);
-        if (saved) setTasks(JSON.parse(saved));
-      }
-    } catch (err) {
-      console.warn("Failed to fetch tasks from server, checking local backup:", err.message);
-      const userStorageKey = `tasks_${currentUser.id || currentUser.email}`;
-      const saved = localStorage.getItem(userStorageKey);
-      if (saved) setTasks(JSON.parse(saved));
+      const [fetchedTasks, fetchedUsers] = await Promise.all([
+        taskApi.getTasks(),
+        currentUser.role === "admin" ? userApi.getUsers() : Promise.resolve([currentUser]),
+      ]);
+      setTasks(fetchedTasks);
+      setUsers(fetchedUsers);
+      setDbStatus((previous) => ({ ...previous, connected: true, message: "Database connected" }));
+    } catch (error) {
+      if (error.status !== 401 && error.status !== 403) setWorkspaceError(error.message);
     } finally {
-      if (showLoadingSpinner) {
-        setLoading(false);
-      }
+      if (showSpinner) setLoading(false);
     }
-  };
+  }, [currentUser]);
 
   useEffect(() => {
-    checkInitialStatus();
+    let active = true;
+    async function initialize() {
+      const health = await taskApi.checkHealth();
+      if (!active) return;
+      setDbStatus({
+        connected: health.status === "ok",
+        message: health.message || "Server unavailable",
+        emailMode: health.emailMode || "simulated",
+        devToolsEnabled: Boolean(health.devToolsEnabled),
+      });
+
+      const token = authStorage.getToken();
+      if (!token) {
+        setSessionChecking(false);
+        return;
+      }
+      try {
+        const response = await authApi.getMe();
+        if (!active) return;
+        authStorage.setUser(response.user);
+        setCurrentUser(response.user);
+      } catch {
+        if (!active) return;
+        authStorage.clearAuth();
+        setCurrentUser(null);
+        setAuthMessage("Your session expired. Please sign in again.");
+      } finally {
+        if (active) setSessionChecking(false);
+      }
+    }
+    void initialize();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      loadTasks(true);
-      userApi.getUsers().then(setUsers).catch(() => {});
-    } else {
-      setTasks([]);
-      setUsers([]);
-      setLoading(false);
+    let active = true;
+    async function refresh() {
+      await Promise.resolve();
+      if (active) await loadWorkspace({ showSpinner: true });
     }
-  }, [currentUser]);
-
-  // Background heartbeat (every 6 seconds, silent check)
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const interval = setInterval(async () => {
-      const isOnline = await checkHealthStatus();
-      if (isOnline) {
-        loadTasks(false);
-      }
-    }, 6000);
-
-    return () => clearInterval(interval);
-  }, [currentUser]);
-
-  // Sync tasks locally per user as fallback
-  useEffect(() => {
-    if (currentUser && !loading) {
-      const userStorageKey = `tasks_${currentUser.id || currentUser.email}`;
-      localStorage.setItem(userStorageKey, JSON.stringify(tasks));
+    if (currentUser && !sessionChecking) void refresh();
+    else if (!currentUser && !sessionChecking) {
+      queueMicrotask(() => {
+        if (active) {
+          setTasks([]);
+          setUsers([]);
+          setLoading(false);
+        }
+      });
     }
-  }, [tasks, currentUser, loading]);
+    return () => { active = false; };
+  }, [currentUser, loadWorkspace, sessionChecking]);
 
-  const handleLogout = () => {
-    authStorage.clearAuth();
-    setCurrentUser(null);
-    setTasks([]);
-    setUsers([]);
-    resetForm();
-  };
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    const interval = window.setInterval(() => {
+      void checkHealthStatus().then((online) => {
+        if (online) void loadWorkspace();
+      });
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [checkHealthStatus, currentUser, loadWorkspace]);
 
-  const completedCount = tasks.filter((task) => task.completed || task.status === "done").length;
-  const inProgressCount = tasks.filter((task) => !task.completed && task.status === "in_progress").length;
-  const pendingCount = tasks.length - completedCount;
+  useEffect(() => {
+    function expireSession() {
+      setCurrentUser(null);
+      setAuthMessage("Your session expired. Please sign in again.");
+    }
+    window.addEventListener("taskpulse:auth-expired", expireSession);
+    window.addEventListener("taskflow:auth-expired", expireSession);
+    return () => {
+      window.removeEventListener("taskpulse:auth-expired", expireSession);
+      window.removeEventListener("taskflow:auth-expired", expireSession);
+    };
+  }, []);
 
-  const overdueCount = tasks.filter((task) => {
-    if (task.completed || task.status === "done" || !task.due_date) return false;
-    const due = new Date(task.due_date);
-    due.setHours(0, 0, 0, 0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return due < today;
-  }).length;
+  useEffect(() => () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  }, []);
 
-  const completionRate =
-    tasks.length === 0
-      ? 0
-      : Math.round((completedCount / tasks.length) * 100);
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key !== "Escape") return;
+      if (confirmation) setConfirmation(null);
+      else if (showForm && !saving) setShowForm(false);
+      else setMobileNavOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmation, saving, showForm]);
+
+  const isAdmin = currentUser?.role === "admin";
+  const assignedTasks = useMemo(() => tasks.filter((task) => task.task_type === "assigned"), [tasks]);
+  const personalTasks = useMemo(() => tasks.filter((task) => task.task_type !== "assigned"), [tasks]);
+  const sectionTasks = taskSection === "assigned" ? assignedTasks : personalTasks;
+  const canCreateInSection = taskSection === "personal" || isAdmin;
+
+  const analytics = useMemo(() => {
+    const today = dateKey();
+    const active = sectionTasks.filter((task) => !(task.completed || task.status === "done"));
+    const todo = sectionTasks.filter((task) => !(task.completed || task.status === "done") && task.status !== "in_progress");
+    const inProgress = sectionTasks.filter((task) => !task.completed && task.status === "in_progress");
+    const completed = sectionTasks.filter((task) => task.completed || task.status === "done");
+    const overdue = active.filter((task) => normalizeDateKey(task.due_date) && normalizeDateKey(task.due_date) < today);
+    const dueToday = active.filter((task) => normalizeDateKey(task.due_date) === today);
+    const upcoming = active
+      .filter((task) => normalizeDateKey(task.due_date) > today)
+      .sort((a, b) => normalizeDateKey(a.due_date).localeCompare(normalizeDateKey(b.due_date)));
+    const recent = [...sectionTasks].sort((a, b) => taskTimestamp(b) - taskTimestamp(a)).slice(0, 4);
+    const priorityCounts = Object.fromEntries(Object.keys(PRIORITY_CONFIG).map((key) => [key, sectionTasks.filter((task) => (task.priority || "medium") === key).length]));
+    return {
+      todo,
+      inProgress,
+      completed,
+      overdue,
+      dueToday,
+      upcoming,
+      recent,
+      priorityCounts,
+      completionRate: sectionTasks.length ? Math.round((completed.length / sectionTasks.length) * 100) : 0,
+    };
+  }, [sectionTasks]);
 
   const filteredTasks = useMemo(() => {
-    let result = tasks.filter((task) => {
-      const matchesSearch =
-        (task.title || "").toLowerCase().includes(search.toLowerCase()) ||
-        (task.description || "").toLowerCase().includes(search.toLowerCase());
+    const query = search.trim().toLowerCase();
+    const today = dateKey();
+    return sectionTasks
+      .filter((task) => {
+        const done = task.completed || task.status === "done";
+        const due = normalizeDateKey(task.due_date);
+        const matchesSearch = !query || [task.title, task.description, task.assignee_name, task.creator_name]
+          .some((value) => String(value || "").toLowerCase().includes(query));
+        const matchesStatus = statusFilter === "all"
+          || (statusFilter === "todo" && !done && task.status !== "in_progress")
+          || (statusFilter === "in_progress" && !done && task.status === "in_progress")
+          || (statusFilter === "done" && done)
+          || (statusFilter === "overdue" && !done && due && due < today);
+        const matchesPriority = priorityFilter === "all" || (task.priority || "medium") === priorityFilter;
+        const matchesDue = dueFilter === "all"
+          || (dueFilter === "today" && due === today)
+          || (dueFilter === "upcoming" && due > today)
+          || (dueFilter === "no_date" && !due);
+        return matchesSearch && matchesStatus && matchesPriority && matchesDue;
+      })
+      .sort((a, b) => {
+        if (sortBy === "priority") return (PRIORITY_CONFIG[b.priority || "medium"]?.order || 2) - (PRIORITY_CONFIG[a.priority || "medium"]?.order || 2);
+        if (sortBy === "due") return (normalizeDateKey(a.due_date) || "9999-12-31").localeCompare(normalizeDateKey(b.due_date) || "9999-12-31");
+        if (sortBy === "title") return String(a.title).localeCompare(String(b.title));
+        if (sortBy === "created") return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        return taskTimestamp(b) - taskTimestamp(a);
+      });
+  }, [dueFilter, priorityFilter, search, sortBy, statusFilter, sectionTasks]);
 
-      const taskIsDone = task.completed || task.status === "done";
-
-      const matchesStatusFilter =
-        filter === "all"
-          ? true
-          : filter === "completed"
-          ? taskIsDone
-          : filter === "pending"
-          ? !taskIsDone
-          : filter === "in_progress"
-          ? task.status === "in_progress"
-          : filter === "overdue"
-          ? !taskIsDone && task.due_date && new Date(task.due_date) < new Date(new Date().setHours(0, 0, 0, 0))
-          : true;
-
-      const matchesPriorityFilter =
-        priorityFilter === "all" ? true : (task.priority || "medium") === priorityFilter;
-
-      return matchesSearch && matchesStatusFilter && matchesPriorityFilter;
-    });
-
-    // Apply Sorting
-    result = [...result].sort((a, b) => {
-      if (sortBy === "priorityDesc") {
-        const orderA = PRIORITY_CONFIG[a.priority || "medium"]?.order || 2;
-        const orderB = PRIORITY_CONFIG[b.priority || "medium"]?.order || 2;
-        return orderB - orderA;
-      }
-      if (sortBy === "priorityAsc") {
-        const orderA = PRIORITY_CONFIG[a.priority || "medium"]?.order || 2;
-        const orderB = PRIORITY_CONFIG[b.priority || "medium"]?.order || 2;
-        return orderA - orderB;
-      }
-      if (sortBy === "dueDate") {
-        if (!a.due_date) return 1;
-        if (!b.due_date) return -1;
-        return new Date(a.due_date) - new Date(b.due_date);
-      }
-      if (sortBy === "title") {
-        return (a.title || "").localeCompare(b.title || "");
-      }
-      return 0;
-    });
-
-    return result;
-  }, [tasks, filter, priorityFilter, sortBy, search]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!title.trim()) {
-      alert("Please enter a task title.");
-      return;
-    }
-
-    const taskStatus = status || "todo";
-    const isCompleted = taskStatus === "done";
-
-    const payload = {
-      title: title.trim(),
-      description: description.trim(),
-      priority: priority || "medium",
-      status: taskStatus,
-      completed: isCompleted,
-      due_date: dueDate || null,
-      user_id: assignedUserId ? Number(assignedUserId) : currentUser.id,
-    };
-
-    if (editId) {
-      try {
-        if (dbStatus.connected && authStorage.getToken()) {
-          const updated = await taskApi.updateTask(editId, payload);
-          setTasks((prev) =>
-            prev.map((t) => (t.id === editId ? updated : t))
-          );
-          showToast("Task updated successfully", "success");
-        } else {
-          setTasks((prev) =>
-            prev.map((task) =>
-              task.id === editId
-                ? { ...task, ...payload }
-                : task
-            )
-          );
-          showToast("Task updated locally", "info");
-        }
-      } catch (err) {
-        alert("Error updating task: " + err.message);
-      }
-    } else {
-      try {
-        if (dbStatus.connected && authStorage.getToken()) {
-          const created = await taskApi.createTask(payload);
-          setTasks((prev) => [created, ...prev]);
-
-          if (created.emailNotification?.status === 'sent') {
-            showToast("Task created & immediate assignment email sent!", "success");
-          } else if (created.emailNotification?.status === 'failed') {
-            showToast("Task created. (Email notification could not be delivered)", "warning");
-          } else {
-            showToast("Task created successfully.", "success");
-          }
-        } else {
-          const newTask = {
-            id: Date.now(),
-            ...payload,
-          };
-          setTasks((prev) => [newTask, ...prev]);
-          showToast("Task created locally", "info");
-        }
-      } catch (err) {
-        alert("Error creating task: " + err.message);
-      }
-    }
-
-    resetForm();
-  };
-
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
+    setEditTask(null);
     setTitle("");
     setDescription("");
     setPriority("medium");
     setStatus("todo");
     setDueDate("");
-    setAssignedUserId("");
-    setEditId(null);
+    setAssignedUserId(currentUser ? String(currentUser.id) : "");
+    setFormError("");
     setShowForm(false);
-  };
+  }, [currentUser]);
 
-  const handleEdit = (task) => {
-    setTitle(task.title);
+  function openCreate(initialStatus = "todo") {
+    if (!canCreateInSection) return;
+    resetForm();
+    setStatus(initialStatus);
+    setAssignedUserId(String(currentUser.id));
+    setShowForm(true);
+  }
+
+  function openEdit(task) {
+    if (!task.can_manage) return;
+    setEditTask(task);
+    setTitle(task.title || "");
     setDescription(task.description || "");
     setPriority(task.priority || "medium");
     setStatus(task.status || (task.completed ? "done" : "todo"));
-    const formattedDate = task.due_date
-      ? new Date(task.due_date).toISOString().split("T")[0]
-      : "";
-    setDueDate(formattedDate);
-    setAssignedUserId(task.user_id ? String(task.user_id) : "");
-    setEditId(task.id);
+    setDueDate(normalizeDateKey(task.due_date) || "");
+    setAssignedUserId(String(task.user_id || currentUser.id));
+    setFormError("");
     setShowForm(true);
-  };
-
-  const handleTestReminder = async (e, task) => {
-    e.stopPropagation();
-    if (task.completed || task.status === "done") {
-      showToast("Reminder cannot be sent for completed tasks.", "warning");
-      return;
-    }
-    try {
-      showToast("Sending test deadline reminder email...", "info");
-      const res = await taskApi.sendTestReminder(task.id);
-      if (res.success) {
-        showToast(`Deadline reminder email sent to ${task.assignee_email || currentUser.email}!`, "success");
-      } else {
-        showToast(res.message || "Failed to send reminder email", "error");
-      }
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  };
-
-  const handleDelete = async (id) => {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to delete this task?"
-    );
-
-    if (confirmDelete) {
-      try {
-        if (dbStatus.connected && authStorage.getToken()) {
-          await taskApi.deleteTask(id);
-        }
-        setTasks((prev) => prev.filter((task) => task.id !== id));
-      } catch (err) {
-        alert("Error deleting task: " + err.message);
-      }
-    }
-  };
-
-  const handleComplete = async (id) => {
-    const taskToUpdate = tasks.find((task) => task.id === id);
-    if (!taskToUpdate) return;
-
-    const nextCompleted = !(taskToUpdate.completed || taskToUpdate.status === "done");
-    const nextStatus = nextCompleted ? "done" : "todo";
-
-    try {
-      if (dbStatus.connected && authStorage.getToken()) {
-        await taskApi.updateTask(id, {
-          completed: nextCompleted,
-          status: nextStatus,
-        });
-      }
-
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === id
-            ? { ...task, completed: nextCompleted, status: nextStatus }
-            : task
-        )
-      );
-    } catch (err) {
-      alert("Error updating status: " + err.message);
-    }
-  };
-
-  // Move task to a specific Kanban column
-  const handleUpdateStatus = async (id, nextStatus) => {
-    const isCompleted = nextStatus === "done";
-
-    try {
-      if (dbStatus.connected && authStorage.getToken()) {
-        await taskApi.updateTask(id, {
-          status: nextStatus,
-          completed: isCompleted,
-        });
-      }
-
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === id
-            ? { ...task, status: nextStatus, completed: isCompleted }
-            : task
-        )
-      );
-    } catch (err) {
-      alert("Error updating task column: " + err.message);
-    }
-  };
-
-  const handleDragStart = (task) => {
-    setDraggedTask(task);
-  };
-
-  // Reordering in List view
-  const handleListDrop = (targetTask) => {
-    if (!draggedTask || draggedTask.id === targetTask.id) return;
-
-    const updatedTasks = [...tasks];
-    const draggedIndex = updatedTasks.findIndex(
-      (task) => task.id === draggedTask.id
-    );
-    const targetIndex = updatedTasks.findIndex(
-      (task) => task.id === targetTask.id
-    );
-
-    const [removedTask] = updatedTasks.splice(draggedIndex, 1);
-    updatedTasks.splice(targetIndex, 0, removedTask);
-
-    setTasks(updatedTasks);
-    setDraggedTask(null);
-  };
-
-  // Moving across columns in Kanban view
-  const handleColumnDrop = (columnId) => {
-    if (!draggedTask) return;
-    if (draggedTask.status !== columnId) {
-      handleUpdateStatus(draggedTask.id, columnId);
-    }
-    setDraggedTask(null);
-  };
-
-  const clearAllTasks = async () => {
-    if (tasks.length === 0) return;
-
-    const confirmClear = window.confirm(
-      "Delete all tasks for your account from the database?"
-    );
-
-    if (confirmClear) {
-      try {
-        if (dbStatus.connected && authStorage.getToken()) {
-          await taskApi.clearAllTasks();
-        }
-        setTasks([]);
-      } catch (err) {
-        alert("Error clearing tasks: " + err.message);
-      }
-    }
-  };
-
-  // ==========================================
-  // CSV & JSON Data Export & Import Handlers
-  // ==========================================
-  const exportToCSV = () => {
-    if (tasks.length === 0) {
-      alert("No tasks available to export.");
-      return;
-    }
-
-    const headers = ["ID", "Title", "Description", "Status", "Priority", "Due Date", "Created At"];
-    const rows = tasks.map((t) => [
-      t.id,
-      `"${(t.title || "").replace(/"/g, '""')}"`,
-      `"${(t.description || "").replace(/"/g, '""')}"`,
-      t.status || (t.completed ? "done" : "todo"),
-      t.priority || "medium",
-      t.due_date || "",
-      t.created_at || "",
-    ]);
-
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const userNameClean = (currentUser.name || "user").toLowerCase().replace(/\s+/g, "_");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `TaskFlow_${userNameClean}_${new Date().toISOString().split("T")[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const exportToJSON = () => {
-    if (tasks.length === 0) {
-      alert("No tasks available to export.");
-      return;
-    }
-
-    const dataStr = JSON.stringify(tasks, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const userNameClean = (currentUser.name || "user").toLowerCase().replace(/\s+/g, "_");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `TaskFlow_Backup_${userNameClean}_${new Date().toISOString().split("T")[0]}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleImportFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const content = event.target.result;
-        let importedList = [];
-
-        if (file.name.endsWith(".json")) {
-          importedList = JSON.parse(content);
-        } else if (file.name.endsWith(".csv")) {
-          const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
-          if (lines.length > 1) {
-            importedList = lines.slice(1).map((line) => {
-              const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-              return {
-                title: (parts[1] || "").replace(/^"|"$/g, "").replace(/""/g, '"').trim(),
-                description: (parts[2] || "").replace(/^"|"$/g, "").replace(/""/g, '"').trim(),
-                status: (parts[3] || "todo").replace(/^"|"$/g, "").trim(),
-                priority: (parts[4] || "medium").replace(/^"|"$/g, "").trim(),
-                due_date: (parts[5] || "").replace(/^"|"$/g, "").trim() || null,
-              };
-            });
-          }
-        }
-
-        if (!Array.isArray(importedList) || importedList.length === 0) {
-          alert("No valid tasks found in the imported file.");
-          return;
-        }
-
-        // Add imported tasks
-        for (const item of importedList) {
-          if (!item.title) continue;
-          const payload = {
-            title: item.title,
-            description: item.description || "",
-            status: item.status || "todo",
-            priority: item.priority || "medium",
-            due_date: item.due_date || null,
-          };
-          if (dbStatus.connected && authStorage.getToken()) {
-            await taskApi.createTask(payload);
-          }
-        }
-
-        await loadTasks(false);
-        alert(`Successfully imported ${importedList.length} tasks!`);
-      } catch (err) {
-        alert("Error importing file: " + err.message);
-      } finally {
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // Helper for setting quick dates
-  const setQuickDueDate = (daysOffset) => {
-    const target = new Date();
-    target.setDate(target.getDate() + daysOffset);
-    setDueDate(target.toISOString().split("T")[0]);
-  };
-
-  // If user is not authenticated, show Auth Page
-  if (!currentUser) {
-    return (
-      <Auth
-        onAuthSuccess={(user) => {
-          setCurrentUser(user);
-          loadTasks(true);
-        }}
-        dbStatus={dbStatus}
-      />
-    );
   }
 
-  // Generate User Initials for Avatar
-  const userInitials = (currentUser.name || currentUser.email || "U")
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .substring(0, 2);
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!title.trim()) {
+      setFormError("Enter a task title.");
+      return;
+    }
+    setSaving(true);
+    setFormError("");
+    const payload = {
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      status,
+      due_date: dueDate || null,
+      task_type: editTask?.task_type || taskSection,
+      user_id: taskSection === "assigned" ? Number(assignedUserId || currentUser.id) : currentUser.id,
+    };
+    try {
+      if (editTask) {
+        const updated = await taskApi.updateTask(editTask.id, payload);
+        setTasks((previous) => previous.map((task) => task.id === updated.id ? updated : task));
+        showToast(updated.emailNotification?.simulated ? "Task updated. Assignment email was simulated." : "Task updated.", "success");
+      } else {
+        const created = await taskApi.createTask(payload);
+        setTasks((previous) => [created, ...previous]);
+        if (created.emailNotification?.status === "sent") showToast("Task created and assignment email sent.", "success");
+        else if (created.emailNotification?.status === "simulated") showToast("Task created. Email was simulated because SMTP is not configured.", "info");
+        else if (created.emailNotification?.status === "failed") showToast("Task created, but email delivery failed.", "warning");
+        else showToast("Task created.", "success");
+      }
+      resetForm();
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateStatus(task, nextStatus) {
+    if (!task.can_update_status || taskActionId) return;
+    setTaskActionId(task.id);
+    try {
+      const updated = await taskApi.updateTask(task.id, { status: nextStatus, completed: nextStatus === "done" });
+      setTasks((previous) => previous.map((item) => item.id === task.id ? updated : item));
+      showToast(nextStatus === "done" ? "Task completed." : "Task status updated.", "success");
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setTaskActionId(null);
+    }
+  }
+
+  async function sendTestReminder(event, task) {
+    event.stopPropagation();
+    setTaskActionId(task.id);
+    try {
+      const result = await taskApi.sendTestReminder(task.id);
+      showToast(result.message, result.simulated ? "info" : result.success ? "success" : "error");
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setTaskActionId(null);
+    }
+  }
+
+  async function runConfirmedAction() {
+    if (!confirmation) return;
+    setConfirming(true);
+    try {
+      if (confirmation.type === "delete") {
+        await taskApi.deleteTask(confirmation.task.id);
+        setTasks((previous) => previous.filter((task) => task.id !== confirmation.task.id));
+        showToast("Task deleted.", "success");
+      } else {
+        const result = await taskApi.clearAllTasks(taskSection);
+        setTasks((previous) => previous.filter((task) => !(task.task_type === taskSection && task.can_manage)));
+        showToast(`${result.deletedCount || 0} ${taskSection === "personal" ? "personal" : "assigned"} task${result.deletedCount === 1 ? "" : "s"} deleted.`, "success");
+      }
+      setConfirmation(null);
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  function handleLogout() {
+    authStorage.clearAuth();
+    setCurrentUser(null);
+    setTasks([]);
+    setUsers([]);
+    setMobileNavOpen(false);
+  }
+
+  function switchView(nextView) {
+    setViewMode(nextView);
+    localStorage.setItem("taskpulse_view", nextView);
+  }
+
+  function toggleTheme() {
+    const nextTheme = theme === "light" ? "dark" : "light";
+    setTheme(nextTheme);
+    localStorage.setItem("taskpulse_theme", nextTheme);
+  }
+
+  function selectStatusFilter(nextFilter) {
+    setStatusFilter(nextFilter);
+    setMobileNavOpen(false);
+  }
+
+  function selectTaskSection(nextSection) {
+    setTaskSection(nextSection);
+    localStorage.setItem("taskpulse_section", nextSection);
+    resetFilters();
+    setMobileNavOpen(false);
+  }
+
+  function resetFilters() {
+    setStatusFilter("all");
+    setPriorityFilter("all");
+    setDueFilter("all");
+    setSortBy("updated");
+    setSearch("");
+  }
+
+  function downloadFile(contents, type, filename) {
+    const url = URL.createObjectURL(new Blob([contents], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function csvCell(value) {
+    let text = String(value ?? "");
+    if (/^[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+
+  function exportCsv() {
+    if (!sectionTasks.length) return showToast("There are no tasks to export in this section.", "warning");
+    const rows = sectionTasks.map((task) => [task.title, task.description, task.status, task.priority, normalizeDateKey(task.due_date) || "", task.assignee_name || ""]);
+    const csv = [["Title", "Description", "Status", "Priority", "Due Date", "Assignee"], ...rows]
+      .map((row) => row.map(csvCell).join(","))
+      .join("\r\n");
+    downloadFile(csv, "text/csv;charset=utf-8", `taskpulse-${dateKey()}.csv`);
+  }
+
+  function exportJson() {
+    if (!sectionTasks.length) return showToast("There are no tasks to export in this section.", "warning");
+    const backup = sectionTasks.map(({ title: taskTitle, description: taskDescription, status: taskStatus, priority: taskPriority, due_date, user_id, task_type }) => ({
+      title: taskTitle,
+      description: taskDescription,
+      status: taskStatus,
+      priority: taskPriority,
+      due_date: normalizeDateKey(due_date),
+      user_id,
+      task_type,
+    }));
+    downloadFile(JSON.stringify(backup, null, 2), "application/json", `taskpulse-backup-${dateKey()}.json`);
+  }
+
+  async function importTasks(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!canCreateInSection) {
+      showToast("Only the admin can import assigned work.", "error");
+      event.target.value = "";
+      return;
+    }
+    setImporting(true);
+    try {
+      const content = await file.text();
+      let imported = [];
+      if (file.name.toLowerCase().endsWith(".json")) imported = JSON.parse(content);
+      else {
+        const lines = content.split(/\r?\n/).filter(Boolean);
+        imported = lines.slice(1).map((line) => {
+          const fields = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((value) => value.replace(/^"|"$/g, "").replaceAll('""', '"'));
+          return { title: fields[0], description: fields[1], status: fields[2], priority: fields[3], due_date: fields[4] || null };
+        });
+      }
+      if (!Array.isArray(imported) || !imported.length) throw new Error("No tasks were found in this file.");
+      if (imported.length > 200) throw new Error("A maximum of 200 tasks can be imported at once.");
+
+      let createdCount = 0;
+      for (const item of imported) {
+        if (!item?.title) continue;
+        await taskApi.createTask({
+          title: String(item.title).slice(0, 255),
+          description: String(item.description || "").slice(0, 5000),
+          status: ["todo", "in_progress", "done"].includes(item.status) ? item.status : "todo",
+          priority: Object.hasOwn(PRIORITY_CONFIG, item.priority) ? item.priority : "medium",
+          due_date: normalizeDateKey(item.due_date),
+          task_type: taskSection,
+          user_id: taskSection === "assigned" ? (parseInt(item.user_id, 10) || currentUser.id) : currentUser.id,
+        });
+        createdCount += 1;
+      }
+      await loadWorkspace();
+      showToast(`${createdCount} task${createdCount === 1 ? "" : "s"} imported.`, "success");
+    } catch (error) {
+      showToast(error.message || "The selected file could not be imported.", "error");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  if (sessionChecking) {
+    return <div className="startup-screen"><div className="brand-mark"><Icon name="check" size={24} /></div><p>Restoring your TaskPulse workspace...</p></div>;
+  }
+
+  if (!currentUser) {
+    return <div className="auth-shell" data-theme={theme}><Auth onAuthSuccess={(user) => { setAuthMessage(""); setCurrentUser(user); }} dbStatus={dbStatus} sessionMessage={authMessage} /></div>;
+  }
+
+  const userInitials = (currentUser.name || currentUser.email || "U").split(/\s+/).map((part) => part[0]).join("").toUpperCase().slice(0, 2);
+  const hasActiveFilters = statusFilter !== "all" || priorityFilter !== "all" || dueFilter !== "all" || search;
+  const managedTaskCount = sectionTasks.filter((task) => task.can_manage).length;
+  const formTaskType = editTask?.task_type || taskSection;
+  const sectionName = taskSection === "assigned" ? "Assigned work" : "Personal to-dos";
+  const sectionDescription = taskSection === "assigned"
+    ? (isAdmin ? "Assign work, monitor progress, and manage team deadlines." : "Complete the work assigned to you by the administrator.")
+    : "Your private task list is visible only to you.";
 
   return (
     <div className="app" data-theme={theme}>
-      {/* Hidden File Input for Import */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleImportFile}
-        accept=".json,.csv"
-        style={{ display: "none" }}
-      />
+      <input ref={fileInputRef} type="file" accept=".json,.csv" hidden onChange={importTasks} />
+      {mobileNavOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
 
-      {/* SIDEBAR */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`}>
         <div className="logo">
-          <div className="logo-icon">✓</div>
-          <div>
-            <h2>TaskFlow</h2>
-            <span>Task Manager</span>
-          </div>
+          <div className="logo-icon"><Icon name="check" size={22} /></div>
+          <div><h2>TaskPulse</h2><span>Focused work, clearly organized</span></div>
+          <button className="mobile-sidebar-close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><Icon name="close" /></button>
         </div>
 
-        {/* Database Status Indicator */}
-        <div
-          onClick={async () => {
-            const ok = await checkHealthStatus();
-            if (ok) loadTasks(false);
-          }}
-          title="Click to refresh / reconnect"
-          className="sidebar-status-pill"
-          style={{
-            background: dbStatus.connected
-              ? "rgba(34, 197, 94, 0.15)"
-              : "rgba(239, 68, 68, 0.15)",
-            color: dbStatus.connected ? "#4ade80" : "#f87171",
-            border: `1px solid ${
-              dbStatus.connected
-                ? "rgba(74, 222, 128, 0.3)"
-                : "rgba(248, 113, 113, 0.3)"
-            }`,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span
-              style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                backgroundColor: dbStatus.connected ? "#4ade80" : "#f87171",
-                boxShadow: dbStatus.connected ? "0 0 8px #4ade80" : "none",
-              }}
-            />
-            {dbStatus.connected ? "MySQL Connected" : "Offline / Retry"}
-          </div>
-          <span style={{ fontSize: "13px", opacity: 0.8, marginLeft: "4px" }}>⟳</span>
-        </div>
+        <button className={`connection-pill ${dbStatus.connected ? "online" : "offline"}`} onClick={() => void checkHealthStatus()} title="Refresh server connection">
+          <span className="connection-dot" />
+          <span><strong>{dbStatus.connected ? "System online" : "Connection issue"}</strong><small>{dbStatus.connected ? `${dbStatus.emailMode === "smtp" ? "Email delivery active" : "Email simulation mode"}` : "Click to retry"}</small></span>
+          <Icon name="refresh" size={15} />
+        </button>
 
-        {/* Navigation Filters */}
-        <nav>
-          <button
-            className={filter === "all" ? "nav-item active" : "nav-item"}
-            onClick={() => setFilter("all")}
-          >
-            <span>▦</span>
-            All Tasks
-            <b>{tasks.length}</b>
+        <span className="sidebar-kicker">Spaces</span>
+        <nav aria-label="Task spaces">
+          <button className={`nav-item ${taskSection === "assigned" ? "active" : ""}`} onClick={() => selectTaskSection("assigned")}>
+            <Icon name="briefcase" size={18} /><span>Assigned work</span><b>{assignedTasks.length}</b>
           </button>
-
-          <button
-            className={filter === "pending" ? "nav-item active" : "nav-item"}
-            onClick={() => setFilter("pending")}
-          >
-            <span>◷</span>
-            To Do
-            <b>{pendingCount - inProgressCount}</b>
+          <button className={`nav-item ${taskSection === "personal" ? "active" : ""}`} onClick={() => selectTaskSection("personal")}>
+            <Icon name="personal" size={18} /><span>Personal to-dos</span><b>{personalTasks.length}</b>
           </button>
-
-          <button
-            className={filter === "in_progress" ? "nav-item active" : "nav-item"}
-            onClick={() => setFilter("in_progress")}
-          >
-            <span>⏳</span>
-            In Progress
-            <b>{inProgressCount}</b>
-          </button>
-
-          <button
-            className={filter === "completed" ? "nav-item active" : "nav-item"}
-            onClick={() => setFilter("completed")}
-          >
-            <span>✓</span>
-            Completed
-            <b>{completedCount}</b>
-          </button>
-
-          {overdueCount > 0 && (
-            <button
-              className={filter === "overdue" ? "nav-item active overdue-nav" : "nav-item overdue-nav"}
-              onClick={() => setFilter("overdue")}
-            >
-              <span>⚠</span>
-              Overdue
-              <b className="overdue-nav-badge">{overdueCount}</b>
-            </button>
-          )}
         </nav>
 
-        {/* Priority Quick Filter in Sidebar */}
         <div className="sidebar-filter-section">
-          <span className="sidebar-section-title">Priority Filter</span>
+          <span className="sidebar-section-title">Status</span>
+          <nav aria-label="Task filters">
+          {[
+            ["all", "grid", "All tasks", sectionTasks.length],
+            ["todo", "circle", "To do", analytics.todo.length],
+            ["in_progress", "progress", "In progress", analytics.inProgress.length],
+            ["done", "check", "Completed", analytics.completed.length],
+            ["overdue", "alert", "Overdue", analytics.overdue.length],
+          ].map(([key, icon, label, count]) => (
+            <button key={key} className={`nav-item ${statusFilter === key ? "active" : ""}`} onClick={() => selectStatusFilter(key)}>
+              <Icon name={icon} size={18} /><span>{label}</span><b>{count}</b>
+            </button>
+          ))}
+          </nav>
+        </div>
+
+        <div className="sidebar-filter-section">
+          <span className="sidebar-section-title">Priority</span>
           <div className="priority-pills-wrap">
-            {["all", "urgent", "high", "medium", "low"].map((p) => (
-              <button
-                key={p}
-                className={`priority-chip ${priorityFilter === p ? "active" : ""}`}
-                onClick={() => setPriorityFilter(p)}
-              >
-                {p === "all" ? "All" : PRIORITY_CONFIG[p].label}
+            {["all", "urgent", "high", "medium", "low"].map((key) => (
+              <button key={key} className={`priority-chip ${priorityFilter === key ? "active" : ""}`} onClick={() => setPriorityFilter(key)}>
+                {key === "all" ? "All" : PRIORITY_CONFIG[key].label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Data Tools in Sidebar */}
-        <div className="sidebar-filter-section">
-          <span className="sidebar-section-title">Data Backup & Tools</span>
-          <div className="sidebar-tools-grid">
-            <button
-              className="tool-btn"
-              onClick={exportToCSV}
-              title="Download CSV spreadsheet"
-            >
-              📊 Export CSV
-            </button>
-            <button
-              className="tool-btn"
-              onClick={exportToJSON}
-              title="Download JSON backup"
-            >
-              💾 Backup JSON
-            </button>
-            <button
-              className="tool-btn"
-              onClick={() => fileInputRef.current?.click()}
-              title="Import JSON or CSV file"
-            >
-              📥 Import Tasks
-            </button>
-          </div>
+        <div className="sidebar-filter-section sidebar-tools">
+          <span className="sidebar-section-title">Data tools</span>
+          <button className="tool-btn" onClick={exportCsv}><Icon name="download" size={15} /> Export CSV</button>
+          <button className="tool-btn" onClick={exportJson}><Icon name="download" size={15} /> Backup JSON</button>
+          {canCreateInSection && <button className="tool-btn" disabled={importing} onClick={() => fileInputRef.current?.click()}><Icon name="upload" size={15} /> {importing ? "Importing..." : "Import tasks"}</button>}
         </div>
 
         <div className="sidebar-bottom">
-          {/* Productivity progress */}
           <div className="productivity-box">
-            <span>Productivity</span>
-            <strong>{completionRate}%</strong>
-            <div className="mini-progress">
-              <div style={{ width: `${completionRate}%` }}></div>
-            </div>
-            <small>Keep going! You're doing great.</small>
+            <div><span>Completion</span><strong>{analytics.completionRate}%</strong></div>
+            <div className="mini-progress"><div style={{ width: `${analytics.completionRate}%` }} /></div>
+            <small>{analytics.completed.length} of {sectionTasks.length} tasks finished</small>
           </div>
-
-          {/* User Profile in Sidebar */}
           <div className="sidebar-user-card">
             <div className="user-avatar">{userInitials}</div>
-            <div className="user-info">
-              <div className="user-name" title={currentUser.name}>
-                {currentUser.name}
-              </div>
-              <div className="user-email" title={currentUser.email}>
-                {currentUser.email}
-              </div>
-            </div>
-            <button
-              className="logout-icon-btn"
-              onClick={handleLogout}
-              title="Sign Out"
-            >
-              ⎋
-            </button>
+            <div className="user-info"><div className="user-name">{currentUser.name}{isAdmin && <span className="role-badge">Admin</span>}</div><div className="user-email">{currentUser.email}</div></div>
+            <button className="logout-icon-btn" onClick={handleLogout} aria-label="Sign out"><Icon name="logout" size={17} /></button>
           </div>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
       <main className="main">
-        {/* HEADER */}
         <header className="topbar">
-          <div>
-            <p className="welcome">
-              Welcome back, <b>{currentUser.name.split(" ")[0]}</b> 👋
-            </p>
-            <h1>My Tasks</h1>
+          <div className="topbar-title-row">
+            <button className="mobile-menu-btn" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
+            <div><p className="welcome">Welcome back, {currentUser.name.split(" ")[0]}</p><h1>{sectionName}</h1><p className="page-description">{sectionDescription}</p></div>
           </div>
-
           <div className="top-actions">
-            {/* View Switcher */}
-            <div className="view-toggle">
-              <button
-                className={`view-btn ${viewMode === "list" ? "active" : ""}`}
-                onClick={() => setViewMode("list")}
-                title="List View"
-              >
-                ☰ List
-              </button>
-              <button
-                className={`view-btn ${viewMode === "kanban" ? "active" : ""}`}
-                onClick={() => setViewMode("kanban")}
-                title="Kanban Board View"
-              >
-                ☷ Board
-              </button>
-            </div>
-
-            {/* Dark Mode Toggle */}
-            <button
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              title={theme === "light" ? "Switch to Dark Mode" : "Switch to Light Mode"}
-            >
-              {theme === "light" ? "🌙 Dark" : "☀️ Light"}
-            </button>
-
-            {/* Search */}
-            <div className="search-box">
-              <span>⌕</span>
-              <input
-                type="text"
-                placeholder="Search tasks..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            {/* Sort Selector */}
-            <div className="sort-box">
-              <span className="sort-label">Sort:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="sort-select"
-              >
-                <option value="default">Default</option>
-                <option value="dueDate">Due Date</option>
-                <option value="priorityDesc">Priority (High-Low)</option>
-                <option value="priorityAsc">Priority (Low-High)</option>
-                <option value="title">A-Z</option>
-              </select>
-            </div>
-
-            <button
-              className="add-button"
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-            >
-              + Add Task
-            </button>
-
-            <button
-              className="user-pill-btn"
-              onClick={handleLogout}
-              title="Click to sign out"
-            >
-              <span className="user-pill-avatar">{userInitials}</span>
-              <span className="user-pill-name">{currentUser.name.split(" ")[0]}</span>
-              <span className="user-pill-logout">Sign Out</span>
-            </button>
+            <label className="search-box"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={taskSection === "assigned" ? "Search work or people" : "Search personal tasks"} aria-label="Search tasks" /></label>
+            <button className="theme-toggle-btn" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}><Icon name={theme === "light" ? "moon" : "sun"} /><span>{theme === "light" ? "Dark" : "Light"}</span></button>
+            {canCreateInSection && <button className="add-button" onClick={() => openCreate()}><Icon name="plus" size={17} /> {taskSection === "assigned" ? "Assign task" : "New to-do"}</button>}
           </div>
         </header>
 
-        {/* STATISTICS */}
-        <section className="stats">
-          <div className="stat-card">
-            <div className="stat-icon purple">▦</div>
-            <div>
-              <span>Total Tasks</span>
-              <strong>{tasks.length}</strong>
-            </div>
-          </div>
+        {workspaceError && <div className="workspace-alert" role="alert"><Icon name="alert" /><span>{workspaceError}</span><button onClick={() => void loadWorkspace({ showSpinner: true })}>Try again</button></div>}
 
-          <div className="stat-card">
-            <div className="stat-icon orange">⏳</div>
-            <div>
-              <span>In Progress</span>
-              <strong>{inProgressCount}</strong>
-            </div>
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-icon green">✓</div>
-            <div>
-              <span>Completed</span>
-              <strong>{completedCount}</strong>
-            </div>
-          </div>
-
-          {overdueCount > 0 ? (
-            <div className="stat-card overdue-card">
-              <div className="stat-icon red">⚠</div>
-              <div>
-                <span>Overdue</span>
-                <strong style={{ color: "#ef4444" }}>{overdueCount}</strong>
-              </div>
-            </div>
-          ) : (
-            <div className="stat-card">
-              <div className="stat-icon blue">%</div>
-              <div>
-                <span>Completion</span>
-                <strong>{completionRate}%</strong>
-              </div>
-            </div>
-          )}
+        <section className="stats" aria-label="Task summary">
+          {[
+            ["Total", sectionTasks.length, "grid", "purple"],
+            ["To do", analytics.todo.length, "circle", "blue"],
+            ["In progress", analytics.inProgress.length, "progress", "orange"],
+            ["Completed", analytics.completed.length, "check", "green"],
+            ["Overdue", analytics.overdue.length, "alert", "red"],
+          ].map(([label, value, icon, tone]) => (
+            <button key={label} className={`stat-card ${label === "Overdue" && value ? "overdue-card" : ""}`} onClick={() => label === "Total" ? selectStatusFilter("all") : label === "To do" ? selectStatusFilter("todo") : label === "In progress" ? selectStatusFilter("in_progress") : label === "Completed" ? selectStatusFilter("done") : selectStatusFilter("overdue")}>
+              <div className={`stat-icon ${tone}`}><Icon name={icon} /></div><div><span>{label}</span><strong>{value}</strong></div>
+            </button>
+          ))}
         </section>
 
-        {/* PROGRESS BAR */}
-        <section className="progress-section">
-          <div className="progress-header">
-            <div>
-              <h3>Workspace Completion</h3>
-              <p>
-                {completedCount} of {tasks.length} tasks completed
-              </p>
+        <section className="dashboard-grid">
+          <article className="insight-card progress-card">
+            <div className="insight-card-header"><div><span className="eyebrow">Progress</span><h2>{taskSection === "assigned" ? "Work completion" : "Personal completion"}</h2></div><strong>{analytics.completionRate}%</strong></div>
+            <div className="progress-bar" role="progressbar" aria-valuenow={analytics.completionRate} aria-valuemin="0" aria-valuemax="100"><div style={{ width: `${analytics.completionRate}%` }} /></div>
+            <p>{analytics.completed.length} complete, {analytics.todo.length + analytics.inProgress.length} still active.</p>
+          </article>
+          <article className="insight-card deadline-card">
+            <div className="insight-card-header"><div><span className="eyebrow">Deadlines</span><h2>What needs attention</h2></div><Icon name="calendar" /></div>
+            <div className="deadline-metrics"><button onClick={() => setDueFilter("today")}><strong>{analytics.dueToday.length}</strong><span>Due today</span></button><button onClick={() => selectStatusFilter("overdue")}><strong>{analytics.overdue.length}</strong><span>Overdue</span></button><button onClick={() => setDueFilter("upcoming")}><strong>{analytics.upcoming.length}</strong><span>Upcoming</span></button></div>
+          </article>
+          <article className="insight-card priority-card">
+            <div className="insight-card-header"><div><span className="eyebrow">Workload</span><h2>Priority distribution</h2></div></div>
+            <div className="priority-bars">
+              {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
+                <button key={key} onClick={() => setPriorityFilter(key)}><span>{config.label}</span><div><i style={{ width: `${sectionTasks.length ? Math.max(5, (analytics.priorityCounts[key] / sectionTasks.length) * 100) : 0}%`, background: config.color }} /></div><b>{analytics.priorityCounts[key]}</b></button>
+              ))}
             </div>
-            <strong>{completionRate}%</strong>
-          </div>
-
-          <div className="progress-bar">
-            <div style={{ width: `${completionRate}%` }}></div>
-          </div>
+          </article>
+          <article className="insight-card recent-card">
+            <div className="insight-card-header"><div><span className="eyebrow">Activity</span><h2>Recently updated</h2></div></div>
+            <div className="recent-list">
+              {analytics.recent.length ? analytics.recent.map((task) => <button key={task.id} onClick={() => task.can_manage && openEdit(task)}><span className={`recent-dot status-${task.status}`} /><span><strong>{task.title}</strong><small>{task.status === "in_progress" ? "In progress" : task.status === "done" ? "Completed" : "To do"}</small></span></button>) : <p>No activity yet.</p>}
+            </div>
+          </article>
         </section>
 
-        {/* TASK HEADER & VIEW CONTAINER */}
-        <div className="task-heading">
-          <div>
-            <h2>
-              {filter === "all"
-                ? "All Tasks"
-                : filter === "pending"
-                ? "To Do Tasks"
-                : filter === "in_progress"
-                ? "In Progress"
-                : filter === "completed"
-                ? "Completed Tasks"
-                : "Overdue Tasks"}
-              {priorityFilter !== "all" && (
-                <span className="active-priority-badge">
-                  • {PRIORITY_CONFIG[priorityFilter]?.label} Priority
-                </span>
-              )}
-            </h2>
-            <p>
-              {viewMode === "kanban"
-                ? "Drag cards across columns to update their workflow status"
-                : "Drag and drop tasks to rearrange or prioritize them"}
-            </p>
+        <section className="workspace-section">
+          <div className="task-heading">
+            <div><span className="eyebrow">{sectionName}</span><h2>{statusFilter === "all" ? "All tasks" : statusFilter === "todo" ? "To do" : statusFilter === "in_progress" ? "In progress" : statusFilter === "done" ? "Completed" : "Overdue"}</h2><p>{filteredTasks.length} task{filteredTasks.length === 1 ? "" : "s"} in this private view</p></div>
+            <div className="task-heading-actions">
+              <div className="view-toggle" role="group" aria-label="Task view"><button className={viewMode === "list" ? "active" : ""} onClick={() => switchView("list")}><Icon name="list" size={16} /> List</button><button className={viewMode === "kanban" ? "active" : ""} onClick={() => switchView("kanban")}><Icon name="board" size={16} /> Board</button></div>
+              {managedTaskCount > 0 && <button className="clear-button" onClick={() => setConfirmation({ type: "clear" })}>Clear managed tasks</button>}
+            </div>
           </div>
 
-          <div className="task-heading-actions">
-            {tasks.length > 0 && (
-              <button className="clear-button" onClick={clearAllTasks}>
-                Clear All
-              </button>
-            )}
+          <div className="filter-toolbar">
+            <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Completed</option><option value="overdue">Overdue</option></select></label>
+            <label>Due<select value={dueFilter} onChange={(event) => setDueFilter(event.target.value)}><option value="all">Any date</option><option value="today">Due today</option><option value="upcoming">Upcoming</option><option value="no_date">No deadline</option></select></label>
+            <label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="updated">Recently updated</option><option value="created">Newest created</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title A-Z</option></select></label>
+            {hasActiveFilters && <button className="reset-filter-btn" onClick={resetFilters}><Icon name="refresh" size={14} /> Reset filters</button>}
           </div>
-        </div>
 
-        {/* ==========================================
-            VIEW MODE: KANBAN BOARD
-        ========================================== */}
-        {viewMode === "kanban" ? (
-          <section className="kanban-board">
-            {KANBAN_COLUMNS.map((col) => {
-              const columnTasks = filteredTasks.filter((task) => {
-                const taskStatus = task.status || (task.completed ? "done" : "todo");
-                return taskStatus === col.id;
-              });
-
-              return (
-                <div
-                  key={col.id}
-                  className="kanban-column"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleColumnDrop(col.id)}
-                >
-                  <div className="kanban-column-header">
-                    <div className="kanban-header-title">
-                      <span>{col.icon}</span>
-                      <h3>{col.title}</h3>
-                    </div>
-                    <span className="kanban-column-count">{columnTasks.length}</span>
-                  </div>
-
+          {loading ? <div className="loading-grid">{[1, 2, 3].map((item) => <div className="task-skeleton" key={item} />)}</div> : viewMode === "kanban" ? (
+            <div className="kanban-board">
+              {KANBAN_COLUMNS.map((column) => {
+                const columnTasks = filteredTasks.filter((task) => (task.status || (task.completed ? "done" : "todo")) === column.id);
+                return <section className="kanban-column" key={column.id} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedTask && draggedTask.status !== column.id) void updateStatus(draggedTask, column.id); setDraggedTask(null); }}>
+                  <header className="kanban-column-header"><div className="kanban-header-title"><span className="column-color" style={{ background: column.color }} /><h3>{column.title}</h3></div><span className="kanban-column-count">{columnTasks.length}</span></header>
                   <div className="kanban-card-list">
-                    {columnTasks.length === 0 ? (
-                      <div className="kanban-empty-drop">
-                        Drop tasks here to set status to <b>{col.title}</b>
-                      </div>
-                    ) : (
-                      columnTasks.map((task) => {
-                        const taskPriority = PRIORITY_CONFIG[task.priority || "medium"] || PRIORITY_CONFIG.medium;
-                        const dueStatus = getDueDateStatus(task.due_date, task.completed || task.status === "done");
-
-                        return (
-                          <div
-                            key={task.id}
-                            className={`kanban-card ${task.completed || task.status === "done" ? "completed" : ""} ${
-                              dueStatus?.state === "overdue" && !task.completed ? "task-overdue-border" : ""
-                            }`}
-                            draggable
-                            onDragStart={() => handleDragStart(task)}
-                          >
-                            <div className="kanban-card-top">
-                              <span
-                                className="priority-pill"
-                                style={{
-                                  backgroundColor: taskPriority.bg,
-                                  color: taskPriority.color,
-                                  borderColor: taskPriority.border,
-                                }}
-                              >
-                                {taskPriority.icon} {taskPriority.label}
-                              </span>
-
-                              <div className="kanban-card-menu">
-                                <button
-                                  className="mini-action-btn"
-                                  onClick={() => handleEdit(task)}
-                                  title="Edit Task"
-                                >
-                                  ✎
-                                </button>
-                                <button
-                                  className="mini-action-btn delete"
-                                  onClick={() => handleDelete(task.id)}
-                                  title="Delete Task"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            </div>
-
-                            <h4 className="kanban-card-title">{task.title}</h4>
-                            {task.description && (
-                              <p className="kanban-card-desc">{task.description}</p>
-                            )}
-
-                            <div className="kanban-card-footer">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                {dueStatus && (
-                                  <span className={`due-pill due-${dueStatus.state}`}>
-                                    📅 {dueStatus.label}
-                                  </span>
-                                )}
-                                <span className="assignee-tag" title={task.assignee_email ? `Assigned to ${task.assignee_name || task.assignee_email}` : undefined}>
-                                  👤 {task.assignee_name ? task.assignee_name.split(" ")[0] : (task.user_id === currentUser.id ? "You" : "Member")}
-                                </span>
-                                {task.deadline_reminder_sent && (
-                                  <span className="reminder-pill" title="Final deadline reminder sent">
-                                    🔔 Sent
-                                  </span>
-                                )}
-                                {!task.completed && task.status !== "done" && task.due_date && (
-                                  <button
-                                    type="button"
-                                    className="test-reminder-btn"
-                                    onClick={(e) => handleTestReminder(e, task)}
-                                    title="Send Test Deadline Reminder Email"
-                                  >
-                                    🔔 Test
-                                  </button>
-                                )}
-                              </div>
-
-                              {/* Quick Move Selector */}
-                              <select
-                                className="kanban-quick-move"
-                                value={task.status || (task.completed ? "done" : "todo")}
-                                onChange={(e) => handleUpdateStatus(task.id, e.target.value)}
-                              >
-                                <option value="todo">📝 To Do</option>
-                                <option value="in_progress">⏳ In Progress</option>
-                                <option value="done">✅ Done</option>
-                              </select>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
+                    {columnTasks.length ? columnTasks.map((task) => {
+                      const priorityConfig = PRIORITY_CONFIG[task.priority || "medium"];
+                      const due = getDueDateStatus(task.due_date, task.completed || task.status === "done");
+                      return <article key={task.id} className={`kanban-card ${task.status === "done" ? "completed" : ""} ${due?.state === "overdue" ? "task-overdue-border" : ""}`} draggable={task.can_update_status} onDragStart={() => setDraggedTask(task)}>
+                        <div className="kanban-card-top"><span className="priority-pill" style={{ color: priorityConfig.color, background: priorityConfig.bg }}><i style={{ background: priorityConfig.color }} />{priorityConfig.label}</span><div className="kanban-card-menu">{task.can_manage && <><button className="mini-action-btn" onClick={() => openEdit(task)} aria-label={`Edit ${task.title}`}><Icon name="edit" size={15} /></button><button className="mini-action-btn delete" onClick={() => setConfirmation({ type: "delete", task })} aria-label={`Delete ${task.title}`}><Icon name="trash" size={15} /></button></>}</div></div>
+                        <h4>{task.title}</h4>{task.description && <p>{task.description}</p>}
+                        <div className="task-meta">{due && <span className={`due-pill due-${due.state}`}><Icon name="calendar" size={13} />{due.label}</span>}{task.task_type === "assigned" ? <span className="assignee-tag"><Icon name="user" size={13} />{task.assignee_name || "Unassigned"}</span> : <span className="personal-tag"><Icon name="personal" size={13} /> Private</span>}</div>
+                        <div className="kanban-card-footer"><small>{task.task_type === "personal" ? "Personal to-do" : task.can_manage ? "Assigned by you" : `From ${task.creator_name || "admin"}`}</small>{task.can_update_status && <select value={task.status} disabled={taskActionId === task.id} onChange={(event) => void updateStatus(task, event.target.value)} aria-label={`Update status for ${task.title}`}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select>}</div>
+                      </article>;
+                    }) : <div className="kanban-empty-drop">No matching tasks</div>}
                   </div>
-
-                  <button
-                    className="kanban-add-column-btn"
-                    onClick={() => {
-                      resetForm();
-                      setStatus(col.id);
-                      setShowForm(true);
-                    }}
-                  >
-                    + Add to {col.title}
-                  </button>
-                </div>
-              );
-            })}
-          </section>
-        ) : (
-          /* ==========================================
-              VIEW MODE: LIST VIEW
-          ========================================== */
-          <section className="task-list">
-            {loading ? (
-              <div className="empty-state">
-                <h3>Loading tasks...</h3>
-              </div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">✓</div>
-                <h3>
-                  {search || priorityFilter !== "all"
-                    ? "No matching tasks"
-                    : "No tasks yet"}
-                </h3>
-                <p>
-                  {search || priorityFilter !== "all"
-                    ? "Try adjusting your search or priority filter."
-                    : "Create your first task with priority and deadline."}
-                </p>
-                {!search && priorityFilter === "all" && (
-                  <button
-                    className="add-button"
-                    onClick={() => setShowForm(true)}
-                  >
-                    + Create Task
-                  </button>
-                )}
-              </div>
-            ) : (
-              filteredTasks.map((task) => {
-                const taskPriority = PRIORITY_CONFIG[task.priority || "medium"] || PRIORITY_CONFIG.medium;
-                const isTaskDone = task.completed || task.status === "done";
-                const dueStatus = getDueDateStatus(task.due_date, isTaskDone);
-
-                return (
-                  <div
-                    key={task.id}
-                    className={`task-card ${isTaskDone ? "completed" : ""} ${
-                      dueStatus?.state === "overdue" && !isTaskDone ? "task-overdue-border" : ""
-                    }`}
-                    draggable
-                    onDragStart={() => handleDragStart(task)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => handleListDrop(task)}
-                  >
-                    <div className="drag-handle">⋮⋮</div>
-
-                    <button
-                      className={
-                        isTaskDone
-                          ? "check completed-check"
-                          : "check"
-                      }
-                      onClick={() => handleComplete(task.id)}
-                    >
-                      {isTaskDone ? "✓" : ""}
-                    </button>
-
-                    <div className="task-content">
-                      <div className="task-title-row">
-                        <div className="task-title-wrap">
-                          <h3>{task.title}</h3>
-                          {/* Priority Pill */}
-                          <span
-                            className="priority-pill"
-                            style={{
-                              backgroundColor: taskPriority.bg,
-                              color: taskPriority.color,
-                              borderColor: taskPriority.border,
-                            }}
-                          >
-                            {taskPriority.icon} {taskPriority.label}
-                          </span>
-
-                          {/* Status Pill */}
-                          <span className={`status-tag status-tag-${task.status || (task.completed ? "done" : "todo")}`}>
-                            {task.status === "in_progress"
-                              ? "⏳ In Progress"
-                              : isTaskDone
-                              ? "✅ Done"
-                              : "📝 To Do"}
-                          </span>
-
-                          {/* Assignee Pill */}
-                          <span className="assignee-tag" title={task.assignee_email ? `Assigned to ${task.assignee_name || task.assignee_email}` : undefined}>
-                            👤 {task.assignee_name ? task.assignee_name.split(" ")[0] : (task.user_id === currentUser.id ? "You" : "Member")}
-                          </span>
-
-                          {/* Due Date Pill */}
-                          {dueStatus && (
-                            <span
-                              className={`due-pill due-${dueStatus.state}`}
-                              title={`Deadline: ${task.due_date}`}
-                            >
-                              📅 {dueStatus.label}
-                            </span>
-                          )}
-
-                          {/* Reminder Status Pill */}
-                          {task.deadline_reminder_sent && (
-                            <span className="reminder-pill" title="Final deadline reminder sent">
-                              🔔 Reminder Sent
-                            </span>
-                          )}
-                        </div>
-
-                        <span
-                          className={
-                            isTaskDone
-                              ? "status completed-status"
-                              : "status pending-status"
-                          }
-                        >
-                          {isTaskDone ? "Completed" : task.status === "in_progress" ? "In Progress" : "Pending"}
-                        </span>
-                      </div>
-
-                      {task.description && <p>{task.description}</p>}
-                    </div>
-
-                    <div className="task-actions">
-                      {!isTaskDone && task.due_date && (
-                        <button
-                          type="button"
-                          className="test-reminder-btn"
-                          onClick={(e) => handleTestReminder(e, task)}
-                          title="Send Test Deadline Reminder Email"
-                        >
-                          🔔 Test Reminder
-                        </button>
-                      )}
-
-                      <button
-                        className="icon-button edit"
-                        onClick={() => handleEdit(task)}
-                        title="Edit"
-                      >
-                        ✎
-                      </button>
-
-                      <button
-                        className="icon-button delete"
-                        onClick={() => handleDelete(task.id)}
-                        title="Delete"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </section>
-        )}
-
-        {/* FOOTER */}
-        <footer>
-          <span>TaskFlow</span>
-          <span>•</span>
-          <span>Personal Workspace for {currentUser.name}</span>
-          <span>•</span>
-          <span>Task Manager</span>
-        </footer>
+                  {canCreateInSection && <button className="kanban-add-column-btn" onClick={() => openCreate(column.id)}><Icon name="plus" size={15} /> {taskSection === "assigned" ? "Assign task" : "Add to-do"}</button>}
+                </section>;
+              })}
+            </div>
+          ) : filteredTasks.length ? (
+            <div className="task-list">
+              {filteredTasks.map((task) => {
+                const done = task.completed || task.status === "done";
+                const priorityConfig = PRIORITY_CONFIG[task.priority || "medium"];
+                const due = getDueDateStatus(task.due_date, done);
+                return <article className={`task-card ${done ? "completed" : ""} ${due?.state === "overdue" ? "task-overdue-border" : ""}`} key={task.id}>
+                  <button className={`check ${done ? "completed-check" : ""}`} disabled={!task.can_update_status || taskActionId === task.id} onClick={() => void updateStatus(task, done ? "todo" : "done")} aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}>{done && <Icon name="check" size={14} />}</button>
+                  <div className="task-content"><div className="task-title-wrap"><h3>{task.title}</h3><span className="priority-pill" style={{ color: priorityConfig.color, background: priorityConfig.bg }}><i style={{ background: priorityConfig.color }} />{priorityConfig.label}</span><span className={`status-tag status-tag-${task.status}`}>{task.status === "in_progress" ? "In progress" : done ? "Done" : "To do"}</span></div>{task.description && <p>{task.description}</p>}<div className="task-meta">{task.task_type === "assigned" ? <span className="assignee-tag"><Icon name="user" size={13} />{task.assignee_name || "Unassigned"}</span> : <span className="personal-tag"><Icon name="personal" size={13} /> Private</span>}{due && <span className={`due-pill due-${due.state}`}><Icon name="calendar" size={13} />{due.label}</span>}{task.task_type === "assigned" && <span className="creator-tag">{task.can_manage ? "Assigned by you" : `Assigned by ${task.creator_name || "admin"}`}</span>}{task.deadline_reminder_sent && <span className="reminder-pill"><Icon name="bell" size={13} /> Reminder sent</span>}</div></div>
+                  <div className="task-actions">{task.task_type === "assigned" && !task.can_manage && task.can_update_status && <label className="status-only-control"><span>Status only</span><select value={task.status} disabled={taskActionId === task.id} onChange={(event) => void updateStatus(task, event.target.value)} aria-label={`Update status for ${task.title}`}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select></label>}{dbStatus.devToolsEnabled && task.can_manage && !done && task.due_date && <button className="text-action-btn" disabled={taskActionId === task.id} onClick={(event) => void sendTestReminder(event, task)}><Icon name="bell" size={14} /> Test</button>}{task.can_manage && <><button className="icon-button edit" onClick={() => openEdit(task)} aria-label={`Edit ${task.title}`}><Icon name="edit" size={16} /></button><button className="icon-button delete" onClick={() => setConfirmation({ type: "delete", task })} aria-label={`Delete ${task.title}`}><Icon name="trash" size={16} /></button></>}</div>
+                </article>;
+              })}
+            </div>
+          ) : <div className="empty-state"><div className="empty-icon"><Icon name={hasActiveFilters ? "search" : taskSection === "assigned" ? "briefcase" : "personal"} size={25} /></div><h3>{hasActiveFilters ? "No tasks match these filters" : taskSection === "assigned" ? "No assigned work yet" : "Your personal list is ready"}</h3><p>{hasActiveFilters ? "Reset the filters or try a different search." : taskSection === "assigned" ? (isAdmin ? "Assign the first work task to a registered user." : "New work will appear here when the administrator assigns it to you.") : "Create a private to-do that only you can see."}</p>{hasActiveFilters ? <button className="secondary-button" onClick={resetFilters}>Reset filters</button> : canCreateInSection && <button className="add-button" onClick={() => openCreate()}><Icon name="plus" size={16} /> {taskSection === "assigned" ? "Assign task" : "Create to-do"}</button>}</div>}
+        </section>
       </main>
 
-      {/* ADD / EDIT MODAL */}
-      {showForm && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target.className === "modal-overlay") {
-              resetForm();
-            }
-          }}
-        >
-          <div className="modal">
-            <div className="modal-header">
-              <div>
-                <span className="modal-label">
-                  {editId ? "EDIT TASK" : "NEW TASK"}
-                </span>
-                <h2>{editId ? "Update your task" : "Create a new task"}</h2>
-              </div>
-              <button className="close-button" onClick={resetForm}>
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit}>
-              <div className="form-group-modal">
-                <label>Task Title *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Complete quarterly project report"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-
-              {/* Status Selector in Modal */}
-              <div className="form-group-modal">
-                <label>Status / Workflow Column</label>
-                <div className="status-select-grid">
-                  {KANBAN_COLUMNS.map((col) => (
-                    <button
-                      type="button"
-                      key={col.id}
-                      className={`status-select-btn ${status === col.id ? "selected" : ""}`}
-                      onClick={() => setStatus(col.id)}
-                    >
-                      <span>{col.icon}</span>
-                      <b>{col.title}</b>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group-modal">
-                <label>Priority Level</label>
-                <div className="priority-select-grid">
-                  {Object.entries(PRIORITY_CONFIG).map(([key, config]) => (
-                    <button
-                      type="button"
-                      key={key}
-                      className={`priority-select-btn ${priority === key ? "selected" : ""}`}
-                      style={{
-                        borderColor: priority === key ? config.color : undefined,
-                        backgroundColor: priority === key ? config.bg : undefined,
-                        color: priority === key ? config.color : undefined,
-                      }}
-                      onClick={() => setPriority(key)}
-                    >
-                      <span>{config.icon}</span>
-                      <b>{config.label}</b>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group-modal">
-                <div className="label-row">
-                  <label>Due Date</label>
-                  {dueDate && (
-                    <button
-                      type="button"
-                      className="clear-date-btn"
-                      onClick={() => setDueDate("")}
-                    >
-                      Clear Date
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                />
-                <div className="quick-date-pills">
-                  <button type="button" onClick={() => setQuickDueDate(0)}>
-                    Today
-                  </button>
-                  <button type="button" onClick={() => setQuickDueDate(1)}>
-                    Tomorrow
-                  </button>
-                  <button type="button" onClick={() => setQuickDueDate(7)}>
-                    In 1 Week
-                  </button>
-                </div>
-              </div>
-
-              {users && users.length > 0 && (
-                <div className="form-group-modal">
-                  <label>Assign To</label>
-                  <select
-                    value={assignedUserId || currentUser.id}
-                    onChange={(e) => setAssignedUserId(e.target.value)}
-                  >
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.email}) {u.id === currentUser.id ? "— (You)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="form-group-modal">
-                <label>Description</label>
-                <textarea
-                  placeholder="Add some details about your task..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows="4"
-                />
-              </div>
-
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="cancel-button"
-                  onClick={resetForm}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="save-button">
-                  {editId ? "Save Changes" : "Create Task"}
-                </button>
-              </div>
-            </form>
-          </div>
+      {showForm && <div className="modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) resetForm(); }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
+          <div className="modal-header"><div><span className="modal-label">{formTaskType === "assigned" ? "ADMIN ASSIGNMENT" : "PERSONAL TO-DO"}</span><h2 id="task-modal-title">{editTask ? "Update task details" : formTaskType === "assigned" ? "Assign work to a user" : "Create a private to-do"}</h2><p>{formTaskType === "assigned" ? "The assignee can update progress while you retain management control." : "This task stays separate from administrator-assigned work."}</p></div><button className="close-button" disabled={saving} onClick={resetForm} aria-label="Close"><Icon name="close" /></button></div>
+          {formError && <div className="form-error" role="alert"><Icon name="alert" size={17} />{formError}</div>}
+          <form onSubmit={handleSubmit}>
+            <div className="form-group-modal"><label htmlFor="task-title">Task title *</label><input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength="255" placeholder="What needs to be done?" autoFocus required disabled={saving} /></div>
+            <div className={`modal-two-column ${formTaskType === "personal" ? "single" : ""}`}><div className="form-group-modal"><label>Status</label><div className="status-select-grid">{KANBAN_COLUMNS.map((column) => <button type="button" key={column.id} className={status === column.id ? "selected" : ""} onClick={() => setStatus(column.id)} disabled={saving}><span className="column-color" style={{ background: column.color }} />{column.title}</button>)}</div></div>{formTaskType === "assigned" && <div className="form-group-modal"><label htmlFor="task-assignee">Assign to</label><select id="task-assignee" value={assignedUserId || currentUser.id} onChange={(event) => setAssignedUserId(event.target.value)} disabled={saving}>{users.map((user) => <option key={user.id} value={user.id}>{user.name}{user.id === currentUser.id ? " (You)" : ""} — {user.email}</option>)}</select></div>}</div>
+            <div className="form-group-modal"><label>Priority</label><div className="priority-select-grid">{Object.entries(PRIORITY_CONFIG).map(([key, config]) => <button type="button" key={key} className={priority === key ? "selected" : ""} style={priority === key ? { borderColor: config.color, color: config.color, background: config.bg } : undefined} onClick={() => setPriority(key)} disabled={saving}><i style={{ background: config.color }} />{config.label}</button>)}</div></div>
+            <div className="form-group-modal"><div className="label-row"><label htmlFor="task-date">Due date</label>{dueDate && <button type="button" className="clear-date-btn" onClick={() => setDueDate("")}>Clear</button>}</div><input id="task-date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={saving} /><div className="quick-date-pills">{[[0, "Today"], [1, "Tomorrow"], [7, "In one week"]].map(([offset, label]) => <button type="button" key={label} onClick={() => { const target = new Date(); target.setDate(target.getDate() + offset); setDueDate(dateKey(target)); }}>{label}</button>)}</div></div>
+            <div className="form-group-modal"><label htmlFor="task-description">Description</label><textarea id="task-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength="5000" rows="4" placeholder="Add context, a useful outcome, or next steps..." disabled={saving} /></div>
+            <div className="modal-actions"><button type="button" className="cancel-button" onClick={resetForm} disabled={saving}>Cancel</button><button type="submit" className="save-button" disabled={saving}>{saving ? "Saving..." : editTask ? "Save changes" : "Create task"}</button></div>
+          </form>
         </div>
-      )}
+      </div>}
 
-      {/* Toast Notification Container */}
-      {toast && (
-        <div className="toast-container">
-          <div className={`toast-item ${toast.type}`}>
-            <span>{toast.message}</span>
-            <button className="toast-close" onClick={() => setToast(null)}>
-              ×
-            </button>
-          </div>
-        </div>
-      )}
+      {confirmation && <div className="modal-overlay"><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><div className="confirm-icon"><Icon name="trash" size={22} /></div><h2 id="confirm-title">{confirmation.type === "delete" ? "Delete this task?" : `Clear ${taskSection === "personal" ? "personal to-dos" : "assigned work"}?`}</h2><p>{confirmation.type === "delete" ? `"${confirmation.task.title}" will be permanently removed.` : `This will permanently delete ${managedTaskCount} task${managedTaskCount === 1 ? "" : "s"} from this section. The other section will not be affected.`}</p><div className="modal-actions"><button className="cancel-button" onClick={() => setConfirmation(null)} disabled={confirming}>Cancel</button><button className="danger-button" onClick={() => void runConfirmedAction()} disabled={confirming}>{confirming ? "Deleting..." : "Delete"}</button></div></div></div>}
+
+      {toast && <div className="toast-container" aria-live="polite"><div className={`toast-item ${toast.type}`}><span>{toast.message}</span><button className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss"><Icon name="close" size={16} /></button></div></div>}
     </div>
   );
 }

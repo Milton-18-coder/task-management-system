@@ -1,228 +1,96 @@
 import { useState } from "react";
 import { authApi, authStorage } from "./api";
 
-export default function Auth({ onAuthSuccess, dbStatus }) {
+export default function Auth({ onAuthSuccess, dbStatus, sessionMessage = "" }) {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(sessionMessage);
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  function switchMode(loginMode) {
+    setIsLogin(loginMode);
+    setError("");
+    setPassword("");
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
     setError("");
 
-    if (!email.trim() || !password) {
-      setError("Please fill in all required fields.");
+    if (!email.trim() || !password || (!isLogin && !name.trim())) {
+      setError("Complete all required fields.");
       return;
     }
-
-    if (!isLogin && !name.trim()) {
-      setError("Please enter your name.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+    if (!isLogin && (password.length < 8 || password.length > 72)) {
+      setError("Use a password between 8 and 72 characters.");
       return;
     }
 
     setLoading(true);
     try {
-      let data;
-      if (isLogin) {
-        data = await authApi.login({
-          email: email.trim(),
-          password: password,
-        });
-      } else {
-        data = await authApi.register({
-          name: name.trim(),
-          email: email.trim(),
-          password: password,
-        });
-      }
-
+      const credentials = { email: email.trim(), password, ...(!isLogin ? { name: name.trim() } : {}) };
+      const data = isLogin ? await authApi.login(credentials) : await authApi.register(credentials);
       authStorage.setToken(data.token);
       authStorage.setUser(data.user);
       onAuthSuccess(data.user);
-    } catch (err) {
-      setError(err.message || "Authentication failed. Please check your credentials.");
+    } catch (requestError) {
+      setError(requestError.message || "Authentication failed. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemoAccount = (demoEmail, demoPassword, demoName) => {
-    setIsLogin(true);
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    if (demoName) setName(demoName);
-    setError("");
-  };
+  }
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        {/* Header / Brand */}
-        <div className="auth-header">
-          <div className="logo-icon auth-logo">✓</div>
-          <h2>TaskFlow</h2>
-          <p className="auth-subtitle">
-            {isLogin
-              ? "Welcome back! Sign in to access your personal tasks."
-              : "Create an account to start organizing your tasks."}
-          </p>
-        </div>
-
-        {/* DB Status Badge */}
-        <div
-          className="auth-db-badge"
-          style={{
-            background: dbStatus?.connected
-              ? "rgba(34, 197, 94, 0.12)"
-              : "rgba(239, 68, 68, 0.12)",
-            color: dbStatus?.connected ? "#22c55e" : "#ef4444",
-            border: `1px solid ${
-              dbStatus?.connected
-                ? "rgba(34, 197, 94, 0.3)"
-                : "rgba(239, 68, 68, 0.3)"
-            }`,
-          }}
-        >
-          <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              backgroundColor: dbStatus?.connected ? "#22c55e" : "#ef4444",
-              boxShadow: dbStatus?.connected ? "0 0 8px #22c55e" : "none",
-            }}
-          />
-          {dbStatus?.connected ? "MySQL Database Online" : "Server Disconnected"}
-        </div>
-
-        {/* Tab Switcher */}
-        <div className="auth-tabs">
-          <button
-            type="button"
-            className={isLogin ? "auth-tab active" : "auth-tab"}
-            onClick={() => {
-              setIsLogin(true);
-              setError("");
-            }}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            className={!isLogin ? "auth-tab active" : "auth-tab"}
-            onClick={() => {
-              setIsLogin(false);
-              setError("");
-            }}
-          >
-            Create Account
-          </button>
-        </div>
-
-        {/* Error Notification */}
-        {error && (
-          <div className="auth-error">
-            <span>⚠</span> {error}
+    <main className="auth-container">
+      <section className="auth-brand-panel">
+        <div className="auth-brand-content">
+          <div className="auth-brand-logo"><span>TP</span><strong>TaskPulse</strong></div>
+          <div className="auth-value-copy">
+            <span className="auth-eyebrow">A calmer way to work</span>
+            <h1>Turn scattered work into clear progress.</h1>
+            <p>Plan personal tasks, coordinate assignments, and keep every deadline visible in one focused workspace.</p>
           </div>
-        )}
+          <div className="auth-feature-list">
+            <div><span>01</span><p><strong>One source of truth</strong>Tasks persist securely in your MySQL workspace.</p></div>
+            <div><span>02</span><p><strong>Built for momentum</strong>Move work from to do to done in list or board view.</p></div>
+            <div><span>03</span><p><strong>Deadline aware</strong>Keep due work visible with reminders and priority signals.</p></div>
+          </div>
+        </div>
+      </section>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="auth-form">
-          {!isLogin && (
-            <div className="form-group">
-              <label>Full Name</label>
-              <input
-                type="text"
-                placeholder="e.g. Sarah Connor"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={loading}
-                autoFocus
-              />
-            </div>
-          )}
-
-          <div className="form-group">
-            <label>Email Address</label>
-            <input
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-              autoFocus={isLogin}
-            />
+      <section className="auth-form-panel">
+        <div className="auth-card">
+          <div className="auth-mobile-brand"><span>TP</span><strong>TaskPulse</strong></div>
+          <div className="auth-header">
+            <span className="auth-kicker">{isLogin ? "WELCOME BACK" : "GET STARTED"}</span>
+            <h2>{isLogin ? "Sign in to your workspace" : "Create your TaskPulse account"}</h2>
+            <p>{isLogin ? "Pick up where you left off." : "Start organizing your work in a few seconds."}</p>
           </div>
 
-          <div className="form-group">
-            <label>Password</label>
-            <div className="password-input-wrap">
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="At least 6 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-              />
-              <button
-                type="button"
-                className="toggle-password"
-                onClick={() => setShowPassword(!showPassword)}
-                tabIndex="-1"
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
+          <div className={`auth-db-badge ${dbStatus?.connected ? "connected" : "disconnected"}`}>
+            <span className="connection-dot" />
+            {dbStatus?.connected ? "TaskPulse services online" : "Server connection unavailable"}
           </div>
 
-          <button
-            type="submit"
-            className="auth-submit-btn"
-            disabled={loading}
-          >
-            {loading ? (
-              <span className="auth-spinner"></span>
-            ) : isLogin ? (
-              "Sign In"
-            ) : (
-              "Create Account"
-            )}
-          </button>
-        </form>
-
-        {/* Quick Demo Test Buttons */}
-        <div className="demo-accounts">
-          <span className="demo-title">Quick Demo Login:</span>
-          <div className="demo-buttons">
-            <button
-              type="button"
-              className="demo-btn"
-              onClick={() => fillDemoAccount("alex@demo.com", "password123", "Alex Dev")}
-            >
-              👤 Alex (alex@demo.com)
-            </button>
-            <button
-              type="button"
-              className="demo-btn"
-              onClick={() => fillDemoAccount("sarah@demo.com", "password123", "Sarah Manager")}
-            >
-              👤 Sarah (sarah@demo.com)
-            </button>
+          <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+            <button type="button" role="tab" aria-selected={isLogin} className={isLogin ? "auth-tab active" : "auth-tab"} onClick={() => switchMode(true)}>Sign in</button>
+            <button type="button" role="tab" aria-selected={!isLogin} className={!isLogin ? "auth-tab active" : "auth-tab"} onClick={() => switchMode(false)}>Create account</button>
           </div>
-          <small className="demo-note">
-            Tip: If it's your first time, switch to "Create Account" or click sign in if already registered.
-          </small>
+
+          {error && <div className="auth-error" role="alert">{error}</div>}
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            {!isLogin && <div className="form-group"><label htmlFor="auth-name">Full name</label><input id="auth-name" type="text" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" placeholder="Your name" disabled={loading} required autoFocus /></div>}
+            <div className="form-group"><label htmlFor="auth-email">Email address</label><input id="auth-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="191" placeholder="you@example.com" disabled={loading} required autoFocus={isLogin} /></div>
+            <div className="form-group"><label htmlFor="auth-password">Password</label><div className="password-input-wrap"><input id="auth-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isLogin ? "current-password" : "new-password"} minLength={isLogin ? undefined : 8} maxLength="72" placeholder={isLogin ? "Your password" : "8 to 72 characters"} disabled={loading} required /><button type="button" className="toggle-password" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div></div>
+            <button type="submit" className="auth-submit-btn" disabled={loading || !dbStatus?.connected}>{loading ? <><span className="auth-spinner" /> Please wait...</> : isLogin ? "Sign in" : "Create account"}</button>
+          </form>
+          <p className="auth-security-note">Your password is hashed before it is stored. TaskPulse never keeps plaintext passwords.</p>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

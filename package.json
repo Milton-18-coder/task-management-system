@@ -10,6 +10,8 @@
     "server:dev": "node --watch server/index.js",
     "build": "vite build",
     "lint": "eslint .",
+    "test:server": "npm --prefix server test",
+    "verify": "npm run lint && npm run build && npm run test:server",
     "preview": "vite preview"
   },
   "dependencies": {
